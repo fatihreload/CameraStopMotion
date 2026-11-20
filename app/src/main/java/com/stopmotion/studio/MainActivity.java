@@ -44,10 +44,11 @@ public class MainActivity extends AppCompatActivity {
     // Output quality: SD/HD/HQ/4K. These are rendered/export dimensions.
     int quality = 1, filterMode = 0, aspectMode = 0, foregroundAlpha = 65;
     String projectName = "Untitled Project";
-    boolean onion = true, playing, paused, front, counting, foregroundVisible = false;
+    boolean onion = true, playing, paused, front, counting, foregroundVisible = false, autoCapturing = false;
+    int autoRemaining = 0;
     Bitmap foregroundBmp;
     VF vf; TextView cnt, cd, projectTitle, qualityTool, aspectTool, foregroundTool, filterTool, playPauseButton; View left, right; LinearLayout strip; HorizontalScrollView hs, topTools; ScrollView drawer;
-    View[] pnl; TextView[] tabs; int cur = -1, con = 100, sat = 100, sel = -1; boolean review, loop = true; Bitmap thumb;
+    View[] pnl; TextView[] tabs; TextView autoCaptureButton; int cur = -1, con = 100, sat = 100, sel = -1; boolean review, loop = true; Bitmap thumb;
     final Map<byte[], Bitmap> thumbs = new IdentityHashMap<>();
     final List<TextView> mi = new ArrayList<>(); final List<String[]> mlabel = new ArrayList<>(); boolean labels;
 
@@ -219,7 +220,8 @@ public class MainActivity extends AppCompatActivity {
                 row(chip("＋ Muat gambar", v -> pickForeground.launch("image/*")), chip("Tampil / Sembunyi", v -> { foregroundVisible = !foregroundVisible; if (foregroundTool != null) foregroundTool.setText(foregroundVisible ? "FOREGROUND  ·  ON" : "FOREGROUND  ·  OFF"); vf.invalidate(); })),
                 seek("Transparansi foreground", 100, foregroundAlpha, v -> { foregroundAlpha = v; vf.invalidate(); }),
                 tip("Foreground adalah gambar PNG/JPG yang ditumpangkan di atas kamera dan ikut tersimpan pada frame. Kualitas mengatur ukuran render ekspor; 4K dapat berupa pembesaran dari preview kamera.")),
-            panel(heading("PENGATURAN FRAME", 13, 0xFFFFB547), cycle("Timer: ", new String[]{"Mati", "3 dtk", "5 dtk", "10 dtk"}, v -> delay = new int[]{0, 3, 5, 10}[v]),
+            panel(heading("PENGATURAN FRAME", 13, 0xFFFFB547), cycle("Timer: ", new String[]{"Mati", "3 dtk", "5 dtk", "10 dtk"}, v -> { delay = new int[]{0, 3, 5, 10}[v]; }),
+                (autoCaptureButton = chip("▶ MULAI FOTO OTOMATIS", v -> toggleAutoCapture())),
                 cycle("Bayangan frame: ", new String[]{"Hidup", "Mati"}, v -> onion = v == 0),
                 tip("Bayangan frame membantu mengatur gerakan antar-frame dengan lebih presisi.")),
             panel(heading("EDIT", 13, 0xFFFFB547), seek("Kecerahan", 100, 50, v -> bright = (v - 50) * 2),
@@ -259,6 +261,7 @@ public class MainActivity extends AppCompatActivity {
         shut.setBackground(shutterBg()); shut.setOnClickListener(v -> { review = false; shoot(); });
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(66), dp(66)); sp.setMargins(0, dp(14), 0, dp(14)); rc.addView(shut, sp);
         TextView captureLabel = heading("CAPTURE", 9, 0xFFFFB547); captureLabel.setGravity(Gravity.CENTER); rc.addView(captureLabel);
+        rc.addView(mb("↺", "Kembali / Ulangi dari awal", v -> replayProject()));
         playPauseButton = mb("▶", "Play / Jeda", v -> togglePlay());
         rc.addView(playPauseButton);
         rc.addView(mb("⟳", "Balik kamera", v -> { front = !front; startCam(); }));
@@ -375,7 +378,7 @@ public class MainActivity extends AppCompatActivity {
             }
             if (loaded.isEmpty()) throw new IOException("Project tidak berisi frame");
             if (loaded.size() > MAXF) throw new IOException("Project melebihi batas " + MAXF + " frame");
-            stopPlay(); counting = false; h.removeCallbacksAndMessages(null);
+            stopPlay(); stopAutoCapture(); counting = false; h.removeCallbacksAndMessages(null);
             frames.clear(); thumbs.clear(); frames.addAll(loaded); sel = -1; review = false; playBmp = null; onionBmp = null;
             projectName = props.getProperty("projectName", "Imported Project");
             quality = readInt(props, "quality", 1, 0, 3); filterMode = readInt(props, "filterMode", 0, 0, 5);
@@ -414,7 +417,7 @@ public class MainActivity extends AppCompatActivity {
                 String entered = name.getText().toString().trim();
                 if (entered.isEmpty()) { toast("Masukkan nama project"); return; }
                 Runnable create = () -> {
-                    stopPlay(); counting = false; h.removeCallbacksAndMessages(null);
+                    stopPlay(); stopAutoCapture(); counting = false; h.removeCallbacksAndMessages(null);
                     frames.clear(); thumbs.clear(); sel = -1; review = false; playing = false; onionBmp = null; playBmp = null;
                     projectName = entered; if (projectTitle != null) projectTitle.setText(projectName);
                     quality = 1; filterMode = 0; aspectMode = 0; foregroundVisible = false; foregroundAlpha = 65; foregroundBmp = null;
@@ -531,8 +534,73 @@ public class MainActivity extends AppCompatActivity {
 
     // frame & timer
     void shoot() {
-        if (playing || counting) return;
+        if (playing || counting || autoCapturing) return;
         if (delay == 0) snap(); else { counting = true; tick(delay); }
+    }
+
+    // Timer otomatis mengambil frame berulang sesuai interval yang dipilih.
+    final Runnable autoCaptureTick = new Runnable() {
+        @Override public void run() {
+            if (!autoCapturing) return;
+            if (autoRemaining > 0) {
+                cd.setText(String.valueOf(autoRemaining));
+                autoRemaining--;
+                h.postDelayed(this, 1000);
+                return;
+            }
+            cd.setText("");
+            snap();
+            if (frames.size() >= MAXF) {
+                stopAutoCapture();
+                toast("Batas maksimal frame tercapai");
+                return;
+            }
+            autoRemaining = delay;
+            h.post(this);
+        }
+    };
+
+    void toggleAutoCapture() {
+        if (autoCapturing) {
+            stopAutoCapture();
+            toast("Foto otomatis dihentikan");
+            return;
+        }
+        if (delay <= 0) {
+            toast("Pilih timer 3, 5, atau 10 detik terlebih dahulu");
+            return;
+        }
+        if (frames.size() >= MAXF) {
+            toast("Maksimal " + MAXF + " frame");
+            return;
+        }
+        stopPlay();
+        counting = false;
+        h.removeCallbacksAndMessages(null);
+        autoCapturing = true;
+        autoRemaining = delay;
+        cd.setText(String.valueOf(autoRemaining));
+        h.post(autoCaptureTick);
+        if (autoCaptureButton != null) { autoCaptureButton.setText("■ HENTIKAN FOTO OTOMATIS"); autoCaptureButton.setBackground(shape(0xFFE53935, 14)); }
+        toast("Foto otomatis dimulai setiap " + delay + " detik. Tekan tombol lagi untuk berhenti.");
+    }
+
+    void stopAutoCapture() {
+        autoCapturing = false;
+        h.removeCallbacks(autoCaptureTick);
+        autoRemaining = 0;
+        if (cd != null) cd.setText("");
+        if (autoCaptureButton != null) { autoCaptureButton.setText("▶ MULAI FOTO OTOMATIS"); autoCaptureButton.setBackground(shape(0xFF202630, 14)); }
+    }
+
+    void replayProject() {
+        if (frames.isEmpty()) { toast("Belum ada frame untuk diulang"); return; }
+        stopPlay();
+        pi = 0;
+        paused = false;
+        review = false;
+        togglePlay();
+        toast("Memutar project dari frame pertama");
     }
     void tick(int n) {
         if (n == 0) { cd.setText(""); counting = false; snap(); return; }
