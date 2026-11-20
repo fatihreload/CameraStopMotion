@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.ContentValues;
 import android.content.Context;
 import android.graphics.*;
+import android.graphics.Typeface;
 import android.media.*;
 import android.net.Uri;
 import android.os.*;
@@ -73,8 +74,12 @@ public class MainActivity extends AppCompatActivity {
     }
     TextView chip(String t, View.OnClickListener l) {
         TextView b = new TextView(this); b.setText(t); b.setTextSize(12); b.setTextColor(0xFFECEBE6); b.setGravity(Gravity.CENTER);
-        b.setPadding(dp(12), dp(9), dp(12), dp(9)); b.setBackground(shape(0xFF2A2C32, 18)); b.setOnClickListener(l);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.setMargins(dp(3), dp(3), dp(3), dp(3));
+        b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        b.setPadding(dp(13), dp(10), dp(13), dp(10));
+        android.graphics.drawable.GradientDrawable bg = shape(0xFF252930, 14);
+        bg.setStroke(dp(1), 0xFF3B414B); b.setBackground(bg); b.setElevation(dp(2));
+        b.setMinHeight(dp(42)); b.setOnClickListener(l);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.setMargins(dp(4), dp(4), dp(4), dp(4));
         b.setLayoutParams(lp); return b;
     }
     TextView cycle(String label, String[] o, IntConsumer f) {
@@ -86,12 +91,20 @@ public class MainActivity extends AppCompatActivity {
     TextView tip(String t) { TextView x = new TextView(this); x.setText(t); x.setTextSize(11); x.setTextColor(0xFF8F939B); x.setPadding(dp(4), dp(6), dp(4), 0); return x; }
     LinearLayout row(View... v) { LinearLayout r = new LinearLayout(this); for (View x : v) r.addView(x); return r; }
     LinearLayout panel(View... v) {
-        LinearLayout c = new LinearLayout(this); c.setOrientation(LinearLayout.VERTICAL); c.setPadding(dp(12), dp(10), dp(12), dp(10));
-        for (View x : v) c.addView(x); return c;
+        LinearLayout c = new LinearLayout(this); c.setOrientation(LinearLayout.VERTICAL);
+        c.setPadding(dp(12), dp(12), dp(12), dp(12)); c.setBackground(shape(0xFF191D23, 16));
+        LinearLayout.LayoutParams outer = new LinearLayout.LayoutParams(-1, -2);
+        outer.setMargins(dp(8), dp(8), dp(8), dp(4)); c.setLayoutParams(outer);
+        for (View x : v) {
+            LinearLayout.LayoutParams item = new LinearLayout.LayoutParams(-1, -2);
+            item.setMargins(0, dp(3), 0, dp(3)); c.addView(x, item);
+        }
+        return c;
     }
     View seek(String label, int max, int val, IntConsumer f) {
         LinearLayout r = new LinearLayout(this); r.setOrientation(LinearLayout.VERTICAL); r.setPadding(dp(4), dp(4), dp(4), dp(2));
-        TextView t = new TextView(this); t.setText(label); t.setTextSize(11); t.setTextColor(0xFF8F939B);
+        TextView t = new TextView(this); t.setText(label); t.setTextSize(11);
+        t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL)); t.setTextColor(0xFFB0B6C0);
         SeekBar s = new SeekBar(this); s.setMax(max); s.setProgress(val);
         s.getProgressDrawable().setTint(0xFFFFB020); s.getThumb().setTint(0xFFFFB020);
         s.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
@@ -121,7 +134,8 @@ public class MainActivity extends AppCompatActivity {
         drawer.setVisibility(cur < 0 ? View.GONE : View.VISIBLE);
         for (int j = 0; j < 3; j++) {
             pnl[j].setVisibility(j == cur ? View.VISIBLE : View.GONE);
-            tabs[j].setBackground(shape(j == cur ? 0xFFFFB020 : 0xFF2A2C32, 18)); tabs[j].setTextColor(j == cur ? 0xFF000000 : 0xFFECEBE6);
+            tabs[j].setBackground(shape(j == cur ? 0xFFFFB020 : 0xFF20252C, 14));
+            tabs[j].setTextColor(j == cur ? 0xFF17191D : 0xFFECEBE6); tabs[j].setElevation(dp(j == cur ? 3 : 0));
         }
     }
 
@@ -167,29 +181,35 @@ public class MainActivity extends AppCompatActivity {
                 tip("Ketuk gambar kecil di bawah untuk memilih frame. Ketuk lagi untuk kembali ke kamera."))};
         FrameLayout holder = new FrameLayout(this);
         for (View v : pnl) { v.setVisibility(View.GONE); holder.addView(v); }
-        drawer = new ScrollView(this); drawer.setBackground(shape(0xE60C0D0F, 16)); drawer.addView(holder); drawer.setVisibility(View.GONE);
+        drawer = new ScrollView(this); drawer.setBackground(shape(0xF012151A, 18));
+        drawer.setElevation(dp(12)); drawer.addView(holder); drawer.setClipToPadding(false); drawer.setVisibility(View.GONE);
         String[] tn = {"Layar", "Timer", "Edit"}, ti = {"\uD83C\uDFA8", "\u23F1", "\u270F"}; tabs = new TextView[3];
         LinearLayout lc = new LinearLayout(this); lc.setOrientation(LinearLayout.VERTICAL); lc.setGravity(Gravity.CENTER);
+        lc.setPadding(dp(5), dp(8), dp(5), dp(8)); lc.setBackground(shape(0xD9101318, 18));
         lc.addView(mb("\u2630", "Tutup nama", v -> { labels = !labels; refreshMenus(); }));
         for (int i = 0; i < 3; i++) { final int k = i; tabs[i] = mb(ti[i], tn[i], v -> openTab(k)); lc.addView(tabs[i]); }
         left = lc;
         strip = new LinearLayout(this); strip.setGravity(Gravity.CENTER_VERTICAL);
-        hs = new HorizontalScrollView(this); hs.setBackground(shape(0x99000000, 14)); hs.addView(strip);
+        hs = new HorizontalScrollView(this); hs.setBackground(shape(0xE9161A20, 16));
+        hs.setElevation(dp(8)); hs.addView(strip);
         Button shut = new Button(this); shut.setBackground(shutterBg()); shut.setOnClickListener(v -> { review = false; shoot(); });
         LinearLayout rc = new LinearLayout(this); rc.setOrientation(LinearLayout.VERTICAL); rc.setGravity(Gravity.CENTER);
+        rc.setPadding(dp(4), dp(8), dp(4), dp(8)); rc.setBackground(shape(0xD9101318, 18));
         rc.addView(mb("\uD83D\uDD33", "Penuh", v -> { left.setVisibility(View.GONE); hs.setVisibility(View.GONE); if (cur >= 0) openTab(cur); }));
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(72), dp(72)); sp.setMargins(0, dp(10), 0, dp(10));
         rc.addView(shut, sp);
         rc.addView(mb("\u25B6", "Putar", v -> togglePlay()));
         rc.addView(mb("\uD83D\uDD04", "Balik kamera", v -> { front = !front; startCam(); }));
         right = rc;
-        cnt = new TextView(this); cnt.setTextColor(0xFFFFB020); cnt.setTextSize(16); cnt.setText("0 frame");
+        cnt = new TextView(this); cnt.setTextColor(0xFFFFC15A); cnt.setTextSize(13);
+        cnt.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL)); cnt.setText("0 FRAME");
+        cnt.setPadding(dp(16), dp(8), dp(16), dp(8)); cnt.setBackground(shape(0xD9161A20, 18));
         cd = new TextView(this); cd.setTextColor(0xFFFFFFFF); cd.setTextSize(90); cd.setGravity(Gravity.CENTER);
-        FrameLayout root = new FrameLayout(this);
+        FrameLayout root = new FrameLayout(this); root.setBackgroundColor(0xFF101216);
         root.addView(vf, new FrameLayout.LayoutParams(-1, -1));
-        FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(290), -1, Gravity.START); dl.setMargins(dp(76), dp(8), 0, dp(76));
+        FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(300), -1, Gravity.START); dl.setMargins(dp(76), dp(8), 0, dp(76));
         root.addView(drawer, dl);
-        FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-1, dp(56), Gravity.BOTTOM); hl.setMargins(dp(76), 0, dp(104), dp(8));
+        FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-1, dp(62), Gravity.BOTTOM); hl.setMargins(dp(76), 0, dp(104), dp(8));
         root.addView(hs, hl);
         root.addView(left, new FrameLayout.LayoutParams(dp(70), -1, Gravity.START));
         root.addView(right, new FrameLayout.LayoutParams(dp(100), -1, Gravity.END));
@@ -291,7 +311,7 @@ public class MainActivity extends AppCompatActivity {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(76), dp(44)); lp.setMargins(dp(3), dp(3), dp(3), dp(3));
             v.setLayoutParams(lp); v.setOnClickListener(x -> select(k == sel ? -1 : k)); strip.addView(v);
         }
-        cnt.setText(frames.size() + " frame");
+        cnt.setText(frames.size() + " FRAME");
         final View c = strip.getChildAt(sel);
         if (c != null) hs.post(() -> hs.smoothScrollTo(c.getLeft() - dp(100), 0));
     }
