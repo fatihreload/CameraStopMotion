@@ -11,7 +11,6 @@ Pilihan SD/HD/HQ/4K menentukan resolusi render frame dan ekspor. Preview interna
 Unggah seluruh isi folder project ke branch `main` di GitHub. Jalankan workflow **Build APK** dari tab Actions, lalu unduh artifact `StopMotionStudio-apk`.
 
 
-## Kontrol pemutaran (perbaikan)
-- **Play / Lanjut** memulai animasi dari awal atau melanjutkan dari frame terakhir setelah jeda.
-- **Jeda** menghentikan sementara tanpa mengatur ulang posisi frame.
-- **Stop** menghentikan pemutaran dan mengembalikan preview ke frame pertama.
+## Toolbar dan pemutaran
+- Toolbar paling atas berisi Quality, Aspect Ratio, Foreground, Filter, dan New Project. Judul besar aplikasi di area preview dihilangkan.
+- Satu tombol Play/Jeda berganti ikon: ▶ untuk Play dan Ⅱ saat sedang memutar (ketuk untuk jeda). Ketuk kembali untuk melanjutkan dari posisi frame terakhir. Tidak ada tombol Stop khusus.

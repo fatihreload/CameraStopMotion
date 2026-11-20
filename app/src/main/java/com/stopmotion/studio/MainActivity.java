@@ -43,7 +43,7 @@ public class MainActivity extends AppCompatActivity {
     String projectName = "Untitled Project";
     boolean onion = true, playing, paused, front, counting, foregroundVisible = false;
     Bitmap foregroundBmp;
-    VF vf; TextView cnt, cd, projectTitle, qualityTool, aspectTool, foregroundTool, filterTool; View left, right; LinearLayout strip; HorizontalScrollView hs, topTools; ScrollView drawer;
+    VF vf; TextView cnt, cd, projectTitle, qualityTool, aspectTool, foregroundTool, filterTool, playPauseButton; View left, right; LinearLayout strip; HorizontalScrollView hs, topTools; ScrollView drawer;
     View[] pnl; TextView[] tabs; int cur = -1, con = 100, sat = 100, sel = -1; boolean review, loop = true; Bitmap thumb;
     final Map<byte[], Bitmap> thumbs = new IdentityHashMap<>();
     final List<TextView> mi = new ArrayList<>(); final List<String[]> mlabel = new ArrayList<>(); boolean labels;
@@ -242,9 +242,8 @@ public class MainActivity extends AppCompatActivity {
         shut.setBackground(shutterBg()); shut.setOnClickListener(v -> { review = false; shoot(); });
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(66), dp(66)); sp.setMargins(0, dp(14), 0, dp(14)); rc.addView(shut, sp);
         TextView captureLabel = heading("CAPTURE", 9, 0xFFFFB547); captureLabel.setGravity(Gravity.CENTER); rc.addView(captureLabel);
-        rc.addView(mb("▶", "Play / Lanjut", v -> togglePlay()));
-        rc.addView(mb("Ⅱ", "Jeda", v -> pausePlay()));
-        rc.addView(mb("■", "Stop", v -> stopAndResetPlay()));
+        playPauseButton = mb("▶", "Play / Jeda", v -> togglePlay());
+        rc.addView(playPauseButton);
         rc.addView(mb("⟳", "Balik kamera", v -> { front = !front; startCam(); }));
         right = rc;
 
@@ -253,30 +252,20 @@ public class MainActivity extends AppCompatActivity {
 
         FrameLayout root = new FrameLayout(this); root.setBackgroundColor(0xFF090C12);
         root.addView(vf, new FrameLayout.LayoutParams(-1, -1));
-        // Header branding and frame counter
-        LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL); header.setPadding(dp(16), dp(4), dp(16), dp(4));
-        header.setBackground(shape(0xD910151D, 16));
-        LinearLayout titleStack = new LinearLayout(this); titleStack.setOrientation(LinearLayout.VERTICAL);
-        titleStack.addView(heading("STOP MOTION PRO", 13, 0xFFF4F6FA));
-        projectTitle = heading(projectName, 8, 0xFFFFB547); titleStack.addView(projectTitle);
-        header.addView(titleStack, new LinearLayout.LayoutParams(0, -1, 1));
-        TextView newProject = chip("＋ NEW PROJECT", v -> newProjectDialog());
-        header.addView(newProject);
-        TextView liveTag = heading("● LIVE", 10, 0xFF67D6A3); liveTag.setPadding(dp(10), 0, dp(10), 0); header.addView(liveTag);
-        FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(-1, dp(48), Gravity.TOP); hp.setMargins(dp(82), dp(8), dp(112), 0); root.addView(header, hp);
-        LinearLayout toolRow = new LinearLayout(this); toolRow.setGravity(Gravity.CENTER_VERTICAL); toolRow.setPadding(dp(8), dp(2), dp(8), dp(2));
+        // Toolbar utama ditempatkan paling atas; branding aplikasi dihilangkan.
+        LinearLayout toolRow = new LinearLayout(this); toolRow.setGravity(Gravity.CENTER_VERTICAL); toolRow.setPadding(dp(6), dp(2), dp(6), dp(2));
         toolRow.setBackground(shape(0xD910151D, 16));
-        qualityTool = chip("QUALITY  ·  HD", v -> chooseQuality());
-        aspectTool = chip("ASPECT  ·  16:9", v -> chooseAspect());
-        foregroundTool = chip("FOREGROUND  ·  OFF", v -> foregroundMenu(v));
-        filterTool = chip("FILTER  ·  ORIGINAL", v -> chooseFilter());
-        toolRow.addView(qualityTool, new LinearLayout.LayoutParams(0, -2, 1));
-        toolRow.addView(aspectTool, new LinearLayout.LayoutParams(0, -2, 1));
-        toolRow.addView(foregroundTool, new LinearLayout.LayoutParams(0, -2, 1));
-        toolRow.addView(filterTool, new LinearLayout.LayoutParams(0, -2, 1));
-        topTools = new HorizontalScrollView(this); topTools.setHorizontalScrollBarEnabled(false); topTools.addView(toolRow);
-        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-1, dp(50), Gravity.TOP); tp.setMargins(dp(82), dp(60), dp(112), 0); root.addView(topTools, tp);
-        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); cp.topMargin = dp(112); root.addView(cnt, cp);
+        qualityTool = chip("QUALITY · HD", v -> chooseQuality());
+        aspectTool = chip("ASPECT · 16:9", v -> chooseAspect());
+        foregroundTool = chip("FOREGROUND · OFF", v -> foregroundMenu(v));
+        filterTool = chip("FILTER · ORIGINAL", v -> chooseFilter());
+        TextView newProject = chip("＋ NEW PROJECT", v -> newProjectDialog());
+        for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, newProject}) {
+            toolRow.addView(item, new LinearLayout.LayoutParams(-2, -2));
+        }
+        topTools = new HorizontalScrollView(this); topTools.setHorizontalScrollBarEnabled(false); topTools.setFillViewport(false); topTools.addView(toolRow);
+        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-1, dp(50), Gravity.TOP); tp.setMargins(dp(82), dp(8), dp(112), 0); root.addView(topTools, tp);
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); cp.topMargin = dp(66); root.addView(cnt, cp);
 
         FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(300), -1, Gravity.START); dl.setMargins(dp(78), dp(116), 0, dp(82)); root.addView(drawer, dl);
         FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM); hl.setMargins(dp(78), 0, dp(112), dp(8)); root.addView(hs, hl);
@@ -324,7 +313,7 @@ public class MainActivity extends AppCompatActivity {
                 Runnable create = () -> {
                     stopPlay(); counting = false; h.removeCallbacksAndMessages(null);
                     frames.clear(); thumbs.clear(); sel = -1; review = false; playing = false; onionBmp = null; playBmp = null;
-                    projectName = entered; projectTitle.setText(projectName);
+                    projectName = entered; if (projectTitle != null) projectTitle.setText(projectName);
                     quality = 1; filterMode = 0; aspectMode = 0; foregroundVisible = false; foregroundAlpha = 65; foregroundBmp = null;
                     qualityTool.setText("QUALITY  ·  HD"); aspectTool.setText("ASPECT  ·  16:9");
                     foregroundTool.setText("FOREGROUND  ·  OFF"); filterTool.setText("FILTER  ·  ORIGINAL");
@@ -501,43 +490,36 @@ public class MainActivity extends AppCompatActivity {
         byte[] d = frames.get(pi++ % frames.size()); playBmp = BitmapFactory.decodeByteArray(d, 0, d.length);
         vf.invalidate(); h.postDelayed(this, 1000 / fps);
     } };
-    // Play memulai dari awal atau melanjutkan dari posisi terakhir setelah jeda.
+    // Satu tombol berganti antara Play dan Jeda. Resume mempertahankan posisi frame.
     void togglePlay() {
-        if (playing) return;
+        if (playing) {
+            playing = false;
+            paused = true;
+            review = true;
+            h.removeCallbacks(pl);
+            updatePlayPauseButton();
+            vf.invalidate();
+            return;
+        }
         if (frames.isEmpty()) { toast("Ambil frame dulu"); return; }
         if (!paused) pi = 0;
         review = false;
         paused = false;
         playing = true;
+        updatePlayPauseButton();
         h.removeCallbacks(pl);
         h.post(pl);
     }
 
-    // Jeda mempertahankan indeks frame sehingga Play dapat melanjutkan.
-    void pausePlay() {
-        if (!playing) return;
-        playing = false;
-        paused = true;
-        review = true;
-        h.removeCallbacks(pl);
-        vf.invalidate();
-    }
-
-    // Stop menghentikan pemutaran dan mengembalikan preview ke frame pertama.
-    void stopAndResetPlay() {
-        stopPlay();
-        pi = 0;
-        if (!frames.isEmpty()) {
-            playBmp = BitmapFactory.decodeByteArray(frames.get(0), 0, frames.get(0).length);
-            review = true;
-        } else {
-            review = false;
-            playBmp = null;
+    void updatePlayPauseButton() {
+        if (playPauseButton != null) {
+            String icon = playing ? "Ⅱ" : "▶";
+            playPauseButton.setText(icon);
+            playPauseButton.setContentDescription(playing ? "Jeda" : "Play");
+            int index = mi.indexOf(playPauseButton);
+            if (index >= 0) mlabel.get(index)[0] = icon;
         }
-        vf.invalidate();
     }
-
-    void stopPlay() { playing = false; paused = false; h.removeCallbacks(pl); }
 
     // ekspor MP4 ke galeri (Movies/StopMotion), berjalan sebanyak durasi video
     void export() {
