@@ -251,6 +251,9 @@ public class MainActivity extends AppCompatActivity {
 
         LinearLayout rc = new LinearLayout(this); rc.setOrientation(LinearLayout.VERTICAL); rc.setGravity(Gravity.CENTER); rc.setPadding(dp(5), dp(10), dp(5), dp(10));
         rc.setBackground(shape(0xD910151D, 20));
+        // Tombol simpan ditempatkan paling atas kanan, tepat di atas menu layar penuh.
+        TextView saveProjectTop = mb("💾", "Simpan Project", v -> saveProjectDialog());
+        rc.addView(saveProjectTop);
         rc.addView(mb("⛶", "Layar penuh", v -> { left.setVisibility(View.GONE); hs.setVisibility(View.GONE); if (cur >= 0) openTab(cur); }));
         TextView shut = new TextView(this); shut.setText("●"); shut.setTextSize(36); shut.setTextColor(0xFFFFFFFF); shut.setGravity(Gravity.CENTER);
         shut.setBackground(shutterBg()); shut.setOnClickListener(v -> { review = false; shoot(); });
@@ -275,8 +278,7 @@ public class MainActivity extends AppCompatActivity {
         filterTool = chip("FILTER · ORIGINAL", v -> chooseFilter());
         TextView openProject = chip("📂 OPEN PROJECT", v -> openProjectDialog());
         TextView newProject = chip("＋ NEW PROJECT", v -> newProjectDialog());
-        TextView saveProject = chip("💾 SAVE PROJECT", v -> saveProjectDialog());
-        for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, openProject, newProject, saveProject}) {
+        for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, openProject, newProject}) {
             toolRow.addView(item, new LinearLayout.LayoutParams(-2, -2));
         }
         topTools = new HorizontalScrollView(this); topTools.setHorizontalScrollBarEnabled(false); topTools.setFillViewport(false); topTools.addView(toolRow);
@@ -617,6 +619,8 @@ public class MainActivity extends AppCompatActivity {
             String icon = playing ? "Ⅱ" : "▶";
             playPauseButton.setText(icon);
             playPauseButton.setContentDescription(playing ? "Jeda" : "Play");
+            // Merah saat pemutaran aktif, kembali ke warna normal saat jeda/berhenti.
+            playPauseButton.setBackground(shape(playing ? 0xFFE53935 : 0xFF202630, 14));
             int index = mi.indexOf(playPauseButton);
             if (index >= 0) mlabel.get(index)[0] = icon;
         }
