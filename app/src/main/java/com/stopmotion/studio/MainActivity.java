@@ -521,6 +521,14 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    // Menghentikan pemutaran dari proses internal tanpa menambahkan tombol Stop di layar.
+    void stopPlay() {
+        playing = false;
+        paused = false;
+        h.removeCallbacks(pl);
+        updatePlayPauseButton();
+    }
+
     // ekspor MP4 ke galeri (Movies/StopMotion), berjalan sebanyak durasi video
     void export() {
         if (frames.isEmpty()) { toast("Ambil frame dulu"); return; }
