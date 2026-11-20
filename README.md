@@ -1,7 +1,10 @@
-# Stop Motion Pro (native, CameraX)
+# Stop Motion Studio – Premium Landscape UI
 
-1. Upload seluruh isi folder ini ke GitHub (branch `main`), termasuk `.github`.
-2. Tab **Actions** > **Build APK** > unduh artifact **StopMotionStudio-apk** (berisi `app-debug.apk`).
-3. Pasang di HP (Android 10 ke atas).
+Versi ini merombak tata letak layar kamera ke desain landscape premium dengan header studio, panel alat kiri, kontrol capture kanan, dan timeline frame di bagian bawah. Logika kamera, chroma key, timer, onion-skin, edit frame, playback, dan ekspor MP4 tetap dipertahankan.
 
-Atau buka di Android Studio: Build > Build APK(s). Kode utama: `app/src/main/java/com/stopmotion/studio/MainActivity.java`.
+## Build APK melalui GitHub Actions
+1. Ekstrak ZIP ini.
+2. Unggah seluruh isi folder proyek ke repository GitHub (branch `main`), timpa file versi lama.
+3. Buka tab **Actions** dan jalankan workflow **Build APK** (atau tunggu build otomatis).
+4. Setelah selesai, unduh artifact **StopMotionStudio-apk**.
+5. Instal `app-debug.apk` di HP. Versi aplikasi dinaikkan menjadi 3.0.
