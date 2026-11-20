@@ -14,6 +14,7 @@ import android.widget.*;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AlertDialog;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
@@ -39,9 +40,10 @@ public class MainActivity extends AppCompatActivity {
     int keyMode, sens = 50, soft = 30, delay, fps = 8, bright, bgColor = 0xFF2B2F6B, pi;
     // Output quality: SD/HD/HQ/4K. These are rendered/export dimensions.
     int quality = 1, filterMode = 0, aspectMode = 0, foregroundAlpha = 65;
-    boolean onion = true, playing, front, counting, foregroundVisible = true;
+    String projectName = "Untitled Project";
+    boolean onion = true, playing, front, counting, foregroundVisible = false;
     Bitmap foregroundBmp;
-    VF vf; TextView cnt, cd; View left, right; LinearLayout strip; HorizontalScrollView hs; ScrollView drawer;
+    VF vf; TextView cnt, cd, projectTitle, qualityTool, aspectTool, foregroundTool, filterTool; View left, right; LinearLayout strip; HorizontalScrollView hs, topTools; ScrollView drawer;
     View[] pnl; TextView[] tabs; int cur = -1, con = 100, sat = 100, sel = -1; boolean review, loop = true; Bitmap thumb;
     final Map<byte[], Bitmap> thumbs = new IdentityHashMap<>();
     final List<TextView> mi = new ArrayList<>(); final List<String[]> mlabel = new ArrayList<>(); boolean labels;
@@ -168,7 +170,7 @@ public class MainActivity extends AppCompatActivity {
             Bitmap src = BitmapFactory.decodeStream(in);
             if (src == null) throw new IOException("Format gambar tidak didukung");
             foregroundBmp = src.copy(Bitmap.Config.ARGB_8888, false);
-            foregroundVisible = true; vf.invalidate(); toast("Foreground berhasil dimuat");
+            foregroundVisible = true; if (foregroundTool != null) foregroundTool.setText("FOREGROUND  ·  ON"); vf.invalidate(); toast("Foreground berhasil dimuat");
         } catch (Exception e) { toast("Foreground tidak bisa dibuka"); }
     });
     ActivityResultLauncher<String> pickImg = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
@@ -201,13 +203,8 @@ public class MainActivity extends AppCompatActivity {
             panel(heading("CHROMA KEY", 13, 0xFFFFB547), cycle("Kunci: ", new String[]{"Mati", "Hijau", "Biru"}, v -> keyMode = v),
                 seek("Kekuatan kunci", 100, sens, v -> sens = v), seek("Kelembutan tepi", 100, soft, v -> soft = v),
                 row(cycle("Latar: ", new String[]{"Biru tua", "Putih", "Hitam", "Hijau"}, v -> { bgColor = cols[v]; bgPx = null; }), chip("＋ Gambar latar", v -> pickImg.launch("image/*"))),
-                heading("KUALITAS HASIL", 12, 0xFFFFB547),
-                row(cycleAt("Quality: ", new String[]{"SD", "HD", "HQ", "4K"}, v -> { quality = v; toast("Resolusi output: " + outputSizeLabel()); }, 1),
-                    cycle("Filter: ", new String[]{"Original", "B&W", "Sepia", "Vintage", "Cool", "Warm"}, v -> { filterMode = v; vf.invalidate(); })),
-                heading("ASPECT RATIO", 12, 0xFFFFB547),
-                cycle("Rasio: ", new String[]{"16:9", "4:3", "1:1", "9:16"}, v -> { aspectMode = v; vf.invalidate(); toast("Aspect ratio: " + new String[]{"16:9", "4:3", "1:1", "9:16"}[v]); }),
                 heading("FOREGROUND / OVERLAY", 12, 0xFFFFB547),
-                row(chip("＋ Muat gambar", v -> pickForeground.launch("image/*")), chip("Tampil / Sembunyi", v -> { foregroundVisible = !foregroundVisible; vf.invalidate(); })),
+                row(chip("＋ Muat gambar", v -> pickForeground.launch("image/*")), chip("Tampil / Sembunyi", v -> { foregroundVisible = !foregroundVisible; if (foregroundTool != null) foregroundTool.setText(foregroundVisible ? "FOREGROUND  ·  ON" : "FOREGROUND  ·  OFF"); vf.invalidate(); })),
                 seek("Transparansi foreground", 100, foregroundAlpha, v -> { foregroundAlpha = v; vf.invalidate(); }),
                 tip("Foreground adalah gambar PNG/JPG yang ditumpangkan di atas kamera dan ikut tersimpan pada frame. Kualitas mengatur ukuran render ekspor; 4K dapat berupa pembesaran dari preview kamera.")),
             panel(heading("PENGATURAN FRAME", 13, 0xFFFFB547), cycle("Timer: ", new String[]{"Mati", "3 dtk", "5 dtk", "10 dtk"}, v -> delay = new int[]{0, 3, 5, 10}[v]),
@@ -258,14 +255,28 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout header = new LinearLayout(this); header.setGravity(Gravity.CENTER_VERTICAL); header.setPadding(dp(16), dp(4), dp(16), dp(4));
         header.setBackground(shape(0xD910151D, 16));
         LinearLayout titleStack = new LinearLayout(this); titleStack.setOrientation(LinearLayout.VERTICAL);
-        titleStack.addView(heading("STOP MOTION", 13, 0xFFF4F6FA));
-        TextView sub = heading("STUDIO  /  FRAME CAMERA", 8, 0xFF8793A5); titleStack.addView(sub);
+        titleStack.addView(heading("STOP MOTION PRO", 13, 0xFFF4F6FA));
+        projectTitle = heading(projectName, 8, 0xFFFFB547); titleStack.addView(projectTitle);
         header.addView(titleStack, new LinearLayout.LayoutParams(0, -1, 1));
-        TextView liveTag = heading("●  LIVE VIEW", 10, 0xFF67D6A3); liveTag.setPadding(dp(10), 0, dp(10), 0); header.addView(liveTag);
+        TextView newProject = chip("＋ NEW PROJECT", v -> newProjectDialog());
+        header.addView(newProject);
+        TextView liveTag = heading("● LIVE", 10, 0xFF67D6A3); liveTag.setPadding(dp(10), 0, dp(10), 0); header.addView(liveTag);
         FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(-1, dp(48), Gravity.TOP); hp.setMargins(dp(82), dp(8), dp(112), 0); root.addView(header, hp);
-        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); cp.topMargin = dp(64); root.addView(cnt, cp);
+        LinearLayout toolRow = new LinearLayout(this); toolRow.setGravity(Gravity.CENTER_VERTICAL); toolRow.setPadding(dp(8), dp(2), dp(8), dp(2));
+        toolRow.setBackground(shape(0xD910151D, 16));
+        qualityTool = chip("QUALITY  ·  HD", v -> chooseQuality());
+        aspectTool = chip("ASPECT  ·  16:9", v -> chooseAspect());
+        foregroundTool = chip("FOREGROUND  ·  OFF", v -> foregroundMenu(v));
+        filterTool = chip("FILTER  ·  ORIGINAL", v -> chooseFilter());
+        toolRow.addView(qualityTool, new LinearLayout.LayoutParams(0, -2, 1));
+        toolRow.addView(aspectTool, new LinearLayout.LayoutParams(0, -2, 1));
+        toolRow.addView(foregroundTool, new LinearLayout.LayoutParams(0, -2, 1));
+        toolRow.addView(filterTool, new LinearLayout.LayoutParams(0, -2, 1));
+        topTools = new HorizontalScrollView(this); topTools.setHorizontalScrollBarEnabled(false); topTools.addView(toolRow);
+        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-1, dp(50), Gravity.TOP); tp.setMargins(dp(82), dp(60), dp(112), 0); root.addView(topTools, tp);
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); cp.topMargin = dp(112); root.addView(cnt, cp);
 
-        FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(300), -1, Gravity.START); dl.setMargins(dp(78), dp(64), 0, dp(82)); root.addView(drawer, dl);
+        FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(300), -1, Gravity.START); dl.setMargins(dp(78), dp(116), 0, dp(82)); root.addView(drawer, dl);
         FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM); hl.setMargins(dp(78), 0, dp(112), dp(8)); root.addView(hs, hl);
         FrameLayout.LayoutParams ll = new FrameLayout.LayoutParams(dp(64), -1, Gravity.START); ll.setMargins(dp(8), dp(8), 0, dp(8)); root.addView(left, ll);
         FrameLayout.LayoutParams rr = new FrameLayout.LayoutParams(dp(88), -1, Gravity.END); rr.setMargins(0, dp(8), dp(8), dp(8)); root.addView(right, rr);
@@ -273,6 +284,58 @@ public class MainActivity extends AppCompatActivity {
         setContentView(root); refreshMenus();
         if (checkSelfPermission(Manifest.permission.CAMERA) == 0) startCam(); else askCam.launch(Manifest.permission.CAMERA);
     }
+    void chooseQuality() {
+        String[] opts = {"SD", "HD", "HQ", "4K"};
+        new AlertDialog.Builder(this).setTitle("Quality").setSingleChoiceItems(opts, quality, (d, which) -> {
+            quality = which; qualityTool.setText("QUALITY  ·  " + opts[which]); d.dismiss(); toast("Quality " + opts[which] + " · " + outputSizeLabel());
+        }).setNegativeButton("Batal", null).show();
+    }
+    void chooseAspect() {
+        String[] opts = {"16:9", "4:3", "1:1", "9:16"};
+        new AlertDialog.Builder(this).setTitle("Aspect Ratio").setSingleChoiceItems(opts, aspectMode, (d, which) -> {
+            aspectMode = which; aspectTool.setText("ASPECT  ·  " + opts[which]); d.dismiss(); vf.invalidate(); toast("Aspect ratio " + opts[which]);
+        }).setNegativeButton("Batal", null).show();
+    }
+    void chooseFilter() {
+        String[] opts = {"Original", "B&W", "Sepia", "Vintage", "Cool", "Warm"};
+        new AlertDialog.Builder(this).setTitle("Filter").setSingleChoiceItems(opts, filterMode, (d, which) -> {
+            filterMode = which; filterTool.setText("FILTER  ·  " + opts[which].toUpperCase(Locale.ROOT)); d.dismiss(); vf.invalidate(); toast("Filter " + opts[which]);
+        }).setNegativeButton("Batal", null).show();
+    }
+    void foregroundMenu(View anchor) {
+        PopupMenu menu = new PopupMenu(this, anchor);
+        menu.getMenu().add("Muat gambar foreground").setOnMenuItemClickListener(item -> { pickForeground.launch("image/*"); return true; });
+        menu.getMenu().add(foregroundVisible ? "Sembunyikan foreground" : "Tampilkan foreground").setOnMenuItemClickListener(item -> {
+            foregroundVisible = !foregroundVisible; foregroundTool.setText(foregroundVisible ? "FOREGROUND  ·  ON" : "FOREGROUND  ·  OFF"); vf.invalidate(); toast(foregroundVisible ? "Foreground aktif" : "Foreground disembunyikan"); return true;
+        });
+        menu.getMenu().add("Atur transparansi").setOnMenuItemClickListener(item -> { openTab(0); return true; });
+        menu.show();
+    }
+    void newProjectDialog() {
+        EditText name = new EditText(this); name.setSingleLine(true); name.setText(projectName.equals("Untitled Project") ? "" : "");
+        name.setHint("Nama project baru"); name.setPadding(dp(14), dp(10), dp(14), dp(10));
+        LinearLayout wrap = new LinearLayout(this); wrap.setPadding(dp(20), dp(8), dp(20), dp(4)); wrap.addView(name);
+        new AlertDialog.Builder(this).setTitle("Buat Project Baru").setMessage("Project baru akan dimulai dengan timeline kosong.")
+            .setView(wrap).setNegativeButton("Batal", null).setPositiveButton("Buat", (dialog, which) -> {
+                String entered = name.getText().toString().trim();
+                if (entered.isEmpty()) { toast("Masukkan nama project"); return; }
+                Runnable create = () -> {
+                    stopPlay(); counting = false; h.removeCallbacksAndMessages(null);
+                    frames.clear(); thumbs.clear(); sel = -1; review = false; playing = false; onionBmp = null; playBmp = null;
+                    projectName = entered; projectTitle.setText(projectName);
+                    quality = 1; filterMode = 0; aspectMode = 0; foregroundVisible = false; foregroundAlpha = 65; foregroundBmp = null;
+                    qualityTool.setText("QUALITY  ·  HD"); aspectTool.setText("ASPECT  ·  16:9");
+                    foregroundTool.setText("FOREGROUND  ·  OFF"); filterTool.setText("FILTER  ·  ORIGINAL");
+                    refreshStrip(); vf.invalidate();
+                    toast("Project baru dibuat: " + projectName);
+                };
+                if (!frames.isEmpty()) new AlertDialog.Builder(this).setTitle("Mulai project baru?")
+                    .setMessage("" + frames.size() + " frame pada project saat ini akan dilepas dari timeline. Pastikan sudah mengekspor video jika masih diperlukan.")
+                    .setNegativeButton("Kembali", null).setPositiveButton("Buat Project", (d, w) -> create.run()).show();
+                else create.run();
+            }).show();
+    }
+
     android.graphics.drawable.Drawable shutterBg() {
         android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
         d.setShape(android.graphics.drawable.GradientDrawable.OVAL); d.setColor(0xFFFF3B30); d.setStroke(dp(5), 0xFFDDDDDD); return d;
