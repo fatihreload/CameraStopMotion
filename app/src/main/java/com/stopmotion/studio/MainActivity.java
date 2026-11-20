@@ -161,7 +161,7 @@ public class MainActivity extends AppCompatActivity {
     void openTab(int i) {
         cur = (cur == i) ? -1 : i;
         drawer.setVisibility(cur < 0 ? View.GONE : View.VISIBLE);
-        for (int j = 0; j < 3; j++) {
+        for (int j = 0; j < pnl.length; j++) {
             pnl[j].setVisibility(j == cur ? View.VISIBLE : View.GONE);
             tabs[j].setBackground(shape(j == cur ? 0xFFFFB020 : 0xFF2A2C32, 18)); tabs[j].setTextColor(j == cur ? 0xFF000000 : 0xFFECEBE6);
         }
@@ -222,27 +222,28 @@ public class MainActivity extends AppCompatActivity {
             panel(heading("PENGATURAN FRAME", 13, 0xFFFFB547), cycle("Timer: ", new String[]{"Mati", "3 dtk", "5 dtk", "10 dtk"}, v -> delay = new int[]{0, 3, 5, 10}[v]),
                 cycle("Bayangan frame: ", new String[]{"Hidup", "Mati"}, v -> onion = v == 0),
                 tip("Bayangan frame membantu mengatur gerakan antar-frame dengan lebih presisi.")),
-            panel(heading("EDIT & EKSPOR", 13, 0xFFFFB547), seek("Kecerahan", 100, 50, v -> bright = (v - 50) * 2),
+            panel(heading("EDIT", 13, 0xFFFFB547), seek("Kecerahan", 100, 50, v -> bright = (v - 50) * 2),
                 seek("Kontras", 100, 50, v -> con = v * 2), seek("Saturasi", 100, 50, v -> sat = v * 2),
                 row(cycle("FPS: ", new String[]{"8", "4", "12", "24"}, v -> fps = new int[]{8, 4, 12, 24}[v]), cycle("Ulang: ", new String[]{"Ya", "Tidak"}, v -> loop = v == 0)),
                 row(chip("Hapus frame", v -> delSel()), chip("Duplikat", v -> dupSel())),
                 row(chip("← Geser", v -> moveSel(-1)), chip("Geser →", v -> moveSel(1))),
                 row(chip("Balik urutan", v -> revAll()), chip("Hapus semua", v -> clearAll())),
-                row(chip("💾 Simpan Project", v -> saveProjectDialog()), chip("⬇ Export Video MP4", v -> export())),
-                tip("Simpan project agar frame bisa dibuka dan diedit lagi. Export Video MP4 menyimpan hasil akhir ke galeri."),
-                tip("Pilih thumbnail untuk meninjau frame. Tekan thumbnail sekali lagi untuk kembali ke kamera."))};
+                tip("Pilih thumbnail untuk meninjau frame. Tekan thumbnail sekali lagi untuk kembali ke kamera.")),
+            panel(heading("EXPORT VIDEO", 13, 0xFFFFB547),
+                chip("⬇ EXPORT VIDEO MP4", v -> export()),
+                tip("Video MP4 akan disimpan ke galeri pada folder Movies/StopMotion."))};
         FrameLayout holder = new FrameLayout(this);
         for (View v : pnl) { v.setVisibility(View.GONE); holder.addView(v); }
         drawer = new ScrollView(this); drawer.setFillViewport(true); drawer.setPadding(dp(5), dp(5), dp(5), dp(5));
         drawer.setBackground(shape(0xF20D121A, 20)); drawer.addView(holder); drawer.setVisibility(View.GONE);
 
-        String[] tn = {"Layar", "Timer", "Edit"}, ti = {"◈", "◷", "✎"}; tabs = new TextView[3];
+        String[] tn = {"Layar", "Timer", "Edit", "Export"}, ti = {"◈", "◷", "✎", "⬇"}; tabs = new TextView[4];
         LinearLayout lc = new LinearLayout(this); lc.setOrientation(LinearLayout.VERTICAL); lc.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         lc.setPadding(dp(5), dp(12), dp(5), dp(8)); lc.setBackground(shape(0xD910151D, 20));
         TextView brandMark = heading("S", 19, 0xFF10151D); brandMark.setGravity(Gravity.CENTER); brandMark.setBackground(shape(0xFFFFB547, 12));
         LinearLayout.LayoutParams bm = new LinearLayout.LayoutParams(dp(42), dp(42)); bm.bottomMargin = dp(16); lc.addView(brandMark, bm);
         lc.addView(mb("☰", "Nama menu", v -> { labels = !labels; refreshMenus(); }));
-        for (int i = 0; i < 3; i++) { final int k = i; tabs[i] = mb(ti[i], tn[i], v -> openTab(k)); lc.addView(tabs[i]); }
+        for (int i = 0; i < tabs.length; i++) { final int k = i; tabs[i] = mb(ti[i], tn[i], v -> openTab(k)); lc.addView(tabs[i]); }
         left = lc;
 
         strip = new LinearLayout(this); strip.setGravity(Gravity.CENTER_VERTICAL); strip.setPadding(dp(5), dp(3), dp(5), dp(3));
@@ -274,7 +275,8 @@ public class MainActivity extends AppCompatActivity {
         filterTool = chip("FILTER · ORIGINAL", v -> chooseFilter());
         TextView openProject = chip("📂 OPEN PROJECT", v -> openProjectDialog());
         TextView newProject = chip("＋ NEW PROJECT", v -> newProjectDialog());
-        for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, openProject, newProject}) {
+        TextView saveProject = chip("💾 SAVE PROJECT", v -> saveProjectDialog());
+        for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, openProject, newProject, saveProject}) {
             toolRow.addView(item, new LinearLayout.LayoutParams(-2, -2));
         }
         topTools = new HorizontalScrollView(this); topTools.setHorizontalScrollBarEnabled(false); topTools.setFillViewport(false); topTools.addView(toolRow);
