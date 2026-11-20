@@ -25,6 +25,9 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.IntConsumer;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 public class MainActivity extends AppCompatActivity {
     static final int W = 1024, H = 576, MAXF = 200;
@@ -187,6 +190,15 @@ public class MainActivity extends AppCompatActivity {
     ActivityResultLauncher<String> askCam = registerForActivityResult(new ActivityResultContracts.RequestPermission(), ok -> {
         if (ok) startCam(); else toast("Izin kamera diperlukan");
     });
+    // Simpan/buka project melalui pemilih file Android (format .smproj).
+    ActivityResultLauncher<String> createProjectFile = registerForActivityResult(
+        new ActivityResultContracts.CreateDocument("application/zip"), uri -> {
+            if (uri != null) saveProjectToUri(uri);
+        });
+    ActivityResultLauncher<String[]> openProjectFile = registerForActivityResult(
+        new ActivityResultContracts.OpenDocument(), uri -> {
+            if (uri != null) openProjectFromUri(uri);
+        });
 
     TextView heading(String value, int size, int color) {
         TextView t = new TextView(this); t.setText(value); t.setTextSize(size); t.setTextColor(color);
@@ -216,7 +228,8 @@ public class MainActivity extends AppCompatActivity {
                 row(chip("Hapus frame", v -> delSel()), chip("Duplikat", v -> dupSel())),
                 row(chip("← Geser", v -> moveSel(-1)), chip("Geser →", v -> moveSel(1))),
                 row(chip("Balik urutan", v -> revAll()), chip("Hapus semua", v -> clearAll())),
-                chip("⬇  EKSPOR VIDEO MP4", v -> export()),
+                row(chip("💾 Simpan Project", v -> saveProjectDialog()), chip("⬇ Export Video MP4", v -> export())),
+                tip("Simpan project agar frame bisa dibuka dan diedit lagi. Export Video MP4 menyimpan hasil akhir ke galeri."),
                 tip("Pilih thumbnail untuk meninjau frame. Tekan thumbnail sekali lagi untuk kembali ke kamera."))};
         FrameLayout holder = new FrameLayout(this);
         for (View v : pnl) { v.setVisibility(View.GONE); holder.addView(v); }
@@ -259,8 +272,9 @@ public class MainActivity extends AppCompatActivity {
         aspectTool = chip("ASPECT · 16:9", v -> chooseAspect());
         foregroundTool = chip("FOREGROUND · OFF", v -> foregroundMenu(v));
         filterTool = chip("FILTER · ORIGINAL", v -> chooseFilter());
+        TextView openProject = chip("📂 OPEN PROJECT", v -> openProjectDialog());
         TextView newProject = chip("＋ NEW PROJECT", v -> newProjectDialog());
-        for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, newProject}) {
+        for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, openProject, newProject}) {
             toolRow.addView(item, new LinearLayout.LayoutParams(-2, -2));
         }
         topTools = new HorizontalScrollView(this); topTools.setHorizontalScrollBarEnabled(false); topTools.setFillViewport(false); topTools.addView(toolRow);
@@ -302,6 +316,91 @@ public class MainActivity extends AppCompatActivity {
         menu.getMenu().add("Atur transparansi").setOnMenuItemClickListener(item -> { openTab(0); return true; });
         menu.show();
     }
+    void saveProjectDialog() {
+        if (frames.isEmpty()) { toast("Belum ada frame untuk disimpan"); return; }
+        String safe = projectName.replaceAll("[^a-zA-Z0-9_-]", "_");
+        createProjectFile.launch((safe.isEmpty() ? "StopMotion_Project" : safe) + ".smproj");
+    }
+    void openProjectDialog() {
+        if (!frames.isEmpty()) {
+            new AlertDialog.Builder(this).setTitle("Buka project lain?")
+                .setMessage("Timeline saat ini akan diganti. Simpan project sekarang terlebih dahulu jika masih diperlukan.")
+                .setNegativeButton("Batal", null)
+                .setPositiveButton("Buka Project", (d, w) -> openProjectFile.launch(new String[]{"application/zip", "application/octet-stream"}))
+                .show();
+        } else openProjectFile.launch(new String[]{"application/zip", "application/octet-stream"});
+    }
+    void saveProjectToUri(Uri uri) {
+        try (OutputStream raw = getContentResolver().openOutputStream(uri); ZipOutputStream zip = new ZipOutputStream(raw)) {
+            if (raw == null) throw new IOException("File tidak bisa dibuat");
+            Properties props = new Properties();
+            props.setProperty("projectName", projectName);
+            props.setProperty("quality", String.valueOf(quality)); props.setProperty("filterMode", String.valueOf(filterMode));
+            props.setProperty("aspectMode", String.valueOf(aspectMode)); props.setProperty("fps", String.valueOf(fps));
+            props.setProperty("delay", String.valueOf(delay)); props.setProperty("keyMode", String.valueOf(keyMode));
+            props.setProperty("sens", String.valueOf(sens)); props.setProperty("soft", String.valueOf(soft));
+            props.setProperty("bright", String.valueOf(bright)); props.setProperty("con", String.valueOf(con)); props.setProperty("sat", String.valueOf(sat));
+            props.setProperty("foregroundAlpha", String.valueOf(foregroundAlpha)); props.setProperty("foregroundVisible", String.valueOf(foregroundVisible));
+            props.setProperty("onion", String.valueOf(onion)); props.setProperty("loop", String.valueOf(loop));
+            props.setProperty("bgColor", String.valueOf(bgColor));
+            zip.putNextEntry(new ZipEntry("project.properties")); props.store(zip, "Stop Motion Project"); zip.closeEntry();
+            for (int i = 0; i < frames.size(); i++) {
+                zip.putNextEntry(new ZipEntry(String.format(Locale.US, "frames/frame_%04d.jpg", i)));
+                zip.write(frames.get(i)); zip.closeEntry();
+            }
+            if (foregroundBmp != null) {
+                zip.putNextEntry(new ZipEntry("foreground.png"));
+                foregroundBmp.compress(Bitmap.CompressFormat.PNG, 100, zip); zip.closeEntry();
+            }
+            zip.finish(); toast("Project berhasil disimpan: " + projectName);
+        } catch (Exception e) { toast("Gagal menyimpan project: " + e.getMessage()); }
+    }
+    void openProjectFromUri(Uri uri) {
+        try (InputStream raw = getContentResolver().openInputStream(uri); ZipInputStream zip = new ZipInputStream(raw)) {
+            if (raw == null) throw new IOException("File tidak bisa dibaca");
+            Properties props = new Properties(); List<byte[]> loaded = new ArrayList<>(); Bitmap loadedForeground = null;
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                ByteArrayOutputStream out = new ByteArrayOutputStream(); byte[] buf = new byte[8192]; int n;
+                while ((n = zip.read(buf)) > 0) out.write(buf, 0, n);
+                String name = entry.getName(); byte[] data = out.toByteArray();
+                if (name.equals("project.properties")) props.load(new ByteArrayInputStream(data));
+                else if (name.startsWith("frames/") && name.endsWith(".jpg")) loaded.add(data);
+                else if (name.equals("foreground.png")) loadedForeground = BitmapFactory.decodeByteArray(data, 0, data.length);
+                zip.closeEntry();
+            }
+            if (loaded.isEmpty()) throw new IOException("Project tidak berisi frame");
+            if (loaded.size() > MAXF) throw new IOException("Project melebihi batas " + MAXF + " frame");
+            stopPlay(); counting = false; h.removeCallbacksAndMessages(null);
+            frames.clear(); thumbs.clear(); frames.addAll(loaded); sel = -1; review = false; playBmp = null; onionBmp = null;
+            projectName = props.getProperty("projectName", "Imported Project");
+            quality = readInt(props, "quality", 1, 0, 3); filterMode = readInt(props, "filterMode", 0, 0, 5);
+            aspectMode = readInt(props, "aspectMode", 0, 0, 3); fps = readInt(props, "fps", 8, 1, 60);
+            delay = readInt(props, "delay", 0, 0, 10); keyMode = readInt(props, "keyMode", 0, 0, 2);
+            sens = readInt(props, "sens", 50, 0, 100); soft = readInt(props, "soft", 30, 0, 100);
+            bright = readInt(props, "bright", 0, -100, 100); con = readInt(props, "con", 100, 0, 200); sat = readInt(props, "sat", 100, 0, 200);
+            foregroundAlpha = readInt(props, "foregroundAlpha", 65, 0, 100);
+            foregroundVisible = Boolean.parseBoolean(props.getProperty("foregroundVisible", "false"));
+            onion = Boolean.parseBoolean(props.getProperty("onion", "true")); loop = Boolean.parseBoolean(props.getProperty("loop", "true"));
+            try { bgColor = Integer.parseInt(props.getProperty("bgColor", String.valueOf(0xFF2B2F6B))); } catch (Exception ignored) { bgColor = 0xFF2B2F6B; }
+            foregroundBmp = loadedForeground; bgPx = null;
+            for (byte[] data : frames) {
+                Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length);
+                if (b != null) thumbs.put(data, Bitmap.createScaledBitmap(b, 160, 90, true));
+                if (b != null) b.recycle();
+            }
+            qualityTool.setText("QUALITY  ·  " + new String[]{"SD", "HD", "HQ", "4K"}[quality]);
+            aspectTool.setText("ASPECT  ·  " + new String[]{"16:9", "4:3", "1:1", "9:16"}[aspectMode]);
+            filterTool.setText("FILTER  ·  " + new String[]{"ORIGINAL", "B&W", "SEPIA", "VINTAGE", "COOL", "WARM"}[filterMode]);
+            foregroundTool.setText(foregroundVisible ? "FOREGROUND  ·  ON" : "FOREGROUND  ·  OFF");
+            after(); toast("Project berhasil dibuka: " + projectName);
+        } catch (Exception e) { toast("Gagal membuka project: " + e.getMessage()); }
+    }
+    int readInt(Properties p, String key, int fallback, int min, int max) {
+        try { return Math.max(min, Math.min(max, Integer.parseInt(p.getProperty(key, String.valueOf(fallback))))); }
+        catch (Exception e) { return fallback; }
+    }
+
     void newProjectDialog() {
         EditText name = new EditText(this); name.setSingleLine(true); name.setText(projectName.equals("Untitled Project") ? "" : "");
         name.setHint("Nama project baru"); name.setPadding(dp(14), dp(10), dp(14), dp(10));
