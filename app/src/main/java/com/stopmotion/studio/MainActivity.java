@@ -41,7 +41,7 @@ public class MainActivity extends AppCompatActivity {
     // Output quality: SD/HD/HQ/4K. These are rendered/export dimensions.
     int quality = 1, filterMode = 0, aspectMode = 0, foregroundAlpha = 65;
     String projectName = "Untitled Project";
-    boolean onion = true, playing, front, counting, foregroundVisible = false;
+    boolean onion = true, playing, paused, front, counting, foregroundVisible = false;
     Bitmap foregroundBmp;
     VF vf; TextView cnt, cd, projectTitle, qualityTool, aspectTool, foregroundTool, filterTool; View left, right; LinearLayout strip; HorizontalScrollView hs, topTools; ScrollView drawer;
     View[] pnl; TextView[] tabs; int cur = -1, con = 100, sat = 100, sel = -1; boolean review, loop = true; Bitmap thumb;
@@ -242,7 +242,9 @@ public class MainActivity extends AppCompatActivity {
         shut.setBackground(shutterBg()); shut.setOnClickListener(v -> { review = false; shoot(); });
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(66), dp(66)); sp.setMargins(0, dp(14), 0, dp(14)); rc.addView(shut, sp);
         TextView captureLabel = heading("CAPTURE", 9, 0xFFFFB547); captureLabel.setGravity(Gravity.CENTER); rc.addView(captureLabel);
-        rc.addView(mb("▶", "Putar", v -> togglePlay()));
+        rc.addView(mb("▶", "Play / Lanjut", v -> togglePlay()));
+        rc.addView(mb("Ⅱ", "Jeda", v -> pausePlay()));
+        rc.addView(mb("■", "Stop", v -> stopAndResetPlay()));
         rc.addView(mb("⟳", "Balik kamera", v -> { front = !front; startCam(); }));
         right = rc;
 
@@ -499,8 +501,43 @@ public class MainActivity extends AppCompatActivity {
         byte[] d = frames.get(pi++ % frames.size()); playBmp = BitmapFactory.decodeByteArray(d, 0, d.length);
         vf.invalidate(); h.postDelayed(this, 1000 / fps);
     } };
-    void togglePlay() { if (playing) stopPlay(); else if (!frames.isEmpty()) { review = false; playing = true; pi = 0; h.post(pl); } }
-    void stopPlay() { playing = false; h.removeCallbacks(pl); }
+    // Play memulai dari awal atau melanjutkan dari posisi terakhir setelah jeda.
+    void togglePlay() {
+        if (playing) return;
+        if (frames.isEmpty()) { toast("Ambil frame dulu"); return; }
+        if (!paused) pi = 0;
+        review = false;
+        paused = false;
+        playing = true;
+        h.removeCallbacks(pl);
+        h.post(pl);
+    }
+
+    // Jeda mempertahankan indeks frame sehingga Play dapat melanjutkan.
+    void pausePlay() {
+        if (!playing) return;
+        playing = false;
+        paused = true;
+        review = true;
+        h.removeCallbacks(pl);
+        vf.invalidate();
+    }
+
+    // Stop menghentikan pemutaran dan mengembalikan preview ke frame pertama.
+    void stopAndResetPlay() {
+        stopPlay();
+        pi = 0;
+        if (!frames.isEmpty()) {
+            playBmp = BitmapFactory.decodeByteArray(frames.get(0), 0, frames.get(0).length);
+            review = true;
+        } else {
+            review = false;
+            playBmp = null;
+        }
+        vf.invalidate();
+    }
+
+    void stopPlay() { playing = false; paused = false; h.removeCallbacks(pl); }
 
     // ekspor MP4 ke galeri (Movies/StopMotion), berjalan sebanyak durasi video
     void export() {

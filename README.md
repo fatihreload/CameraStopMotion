@@ -9,3 +9,9 @@ Pilihan SD/HD/HQ/4K menentukan resolusi render frame dan ekspor. Preview interna
 
 ## Build APK
 Unggah seluruh isi folder project ke branch `main` di GitHub. Jalankan workflow **Build APK** dari tab Actions, lalu unduh artifact `StopMotionStudio-apk`.
+
+
+## Kontrol pemutaran (perbaikan)
+- **Play / Lanjut** memulai animasi dari awal atau melanjutkan dari frame terakhir setelah jeda.
+- **Jeda** menghentikan sementara tanpa mengatur ulang posisi frame.
+- **Stop** menghentikan pemutaran dan mengembalikan preview ke frame pertama.
