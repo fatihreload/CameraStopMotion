@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.app.AlertDialog;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.Camera;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
@@ -45,6 +46,10 @@ public class MainActivity extends AppCompatActivity {
     int quality = 1, filterMode = 0, aspectMode = 0, foregroundAlpha = 65;
     String projectName = "Untitled Project";
     boolean onion = true, playing, paused, front, counting, foregroundVisible = false, autoCapturing = false;
+	boolean flashOn = false;
+	Camera activeCamera;
+	MediaActionSound shutterSound;
+	TextView flashButton;
     int autoRemaining = 0;
     Bitmap foregroundBmp;
     VF vf; TextView cnt, cd, projectTitle, qualityTool, aspectTool, foregroundTool, filterTool, playPauseButton; View left, right; LinearLayout strip; HorizontalScrollView hs, topTools; ScrollView drawer;
@@ -258,6 +263,8 @@ public class MainActivity extends AppCompatActivity {
         TextView saveProjectTop = mb("💾", "Simpan Project", v -> saveProjectDialog());
         rc.addView(saveProjectTop);
         rc.addView(mb("⛶", "Layar penuh", v -> { left.setVisibility(View.GONE); hs.setVisibility(View.GONE); if (cur >= 0) openTab(cur); }));
+		flashButton = mb("⚡ OFF", "Flash kamera ON / OFF", v -> toggleFlash());
+		rc.addView(flashButton);
         TextView shut = new TextView(this); shut.setText("●"); shut.setTextSize(36); shut.setTextColor(0xFFFFFFFF); shut.setGravity(Gravity.CENTER);
         shut.setBackground(shutterBg()); shut.setOnClickListener(v -> { review = false; shoot(); });
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(66), dp(66)); sp.setMargins(0, dp(14), 0, dp(14)); rc.addView(shut, sp);
@@ -294,6 +301,9 @@ public class MainActivity extends AppCompatActivity {
         FrameLayout.LayoutParams rr = new FrameLayout.LayoutParams(dp(88), -1, Gravity.END); rr.setMargins(0, dp(8), dp(8), dp(8)); root.addView(right, rr);
         root.addView(cd, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
         setContentView(root); refreshMenus();
+
+		shutterSound = new MediaActionSound();
+		shutterSound.load(MediaActionSound.SHUTTER_CLICK);
         if (checkSelfPermission(Manifest.permission.CAMERA) == 0) startCam(); else askCam.launch(Manifest.permission.CAMERA);
     }
     void chooseQuality() {
@@ -445,17 +455,72 @@ public class MainActivity extends AppCompatActivity {
 
     // kamera
     void startCam() {
-        ProcessCameraProvider.getInstance(this).addListener(() -> {
-            try {
-                ProcessCameraProvider p = ProcessCameraProvider.getInstance(this).get(); p.unbindAll();
-                ImageAnalysis a = new ImageAnalysis.Builder().setTargetResolution(new Size(1280, 720))
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888).build();
-                a.setAnalyzer(ex, this::onFrame);
-                p.bindToLifecycle(this, front ? CameraSelector.DEFAULT_FRONT_CAMERA : CameraSelector.DEFAULT_BACK_CAMERA, a);
-            } catch (Exception e) { toast("Kamera gagal dibuka"); }
-        }, ContextCompat.getMainExecutor(this));
+    ProcessCameraProvider.getInstance(this).addListener(() -> {
+        try {
+            ProcessCameraProvider p = ProcessCameraProvider.getInstance(this).get();
+            p.unbindAll();
+
+            ImageAnalysis a = new ImageAnalysis.Builder()
+                .setTargetResolution(new Size(1280, 720))
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                .build();
+
+            a.setAnalyzer(ex, this::onFrame);
+
+            activeCamera = p.bindToLifecycle(
+                this,
+                front ? CameraSelector.DEFAULT_FRONT_CAMERA : CameraSelector.DEFAULT_BACK_CAMERA,
+                a
+            );
+
+            if (flashOn) {
+                if (!front && activeCamera.getCameraInfo().hasFlashUnit()) {
+                    activeCamera.getCameraControl().enableTorch(true);
+                } else {
+                    flashOn = false;
+                    updateFlashButton();
+                }
+            }
+
+        } catch (Exception e) {
+            toast("Kamera gagal dibuka");
+        }
+    }, ContextCompat.getMainExecutor(this));
+}
+void toggleFlash() {
+    if (front) {
+        toast("Flash hanya tersedia pada kamera belakang");
+        return;
     }
+
+    if (activeCamera == null || !activeCamera.getCameraInfo().hasFlashUnit()) {
+        toast("Perangkat tidak memiliki flash kamera");
+        return;
+    }
+
+    flashOn = !flashOn;
+
+    activeCamera.getCameraControl().enableTorch(flashOn);
+
+    updateFlashButton();
+
+    toast(flashOn ? "Flash dinyalakan" : "Flash dimatikan");
+}
+
+void updateFlashButton() {
+    if (flashButton != null) {
+        flashButton.setText(flashOn ? "⚡ ON" : "⚡ OFF");
+
+        flashButton.setBackground(
+            shape(flashOn ? 0xFFFFB547 : 0xFF202630, 14)
+        );
+
+        flashButton.setTextColor(
+            flashOn ? 0xFF10151D : 0xFFF2F4F8
+        );
+    }
+}
     void onFrame(ImageProxy ip) {
         try {
             Bitmap src = ip.toBitmap(); int rot = ip.getImageInfo().getRotationDegrees();
@@ -599,6 +664,9 @@ public class MainActivity extends AppCompatActivity {
     }
     void snap() {
         if (frames.size() >= MAXF) { toast("Maksimal " + MAXF + " frame"); return; }
+		if (shutterSound != null) {
+    shutterSound.play(MediaActionSound.SHUTTER_CLICK);
+}
         ByteArrayOutputStream o = new ByteArrayOutputStream();
         Bitmap capture = makeCaptureBitmap();
         capture.compress(Bitmap.CompressFormat.JPEG, 95, o);
@@ -606,6 +674,23 @@ public class MainActivity extends AppCompatActivity {
         thumb = Bitmap.createScaledBitmap(capture, 160, 90, true); capture.recycle();
         byte[] jb = o.toByteArray(); frames.add(jb); thumbs.put(jb, thumb); review = false; sel = frames.size() - 1; refreshStrip();
         toast("Frame disimpan · " + outputSizeLabel());
+		@Override
+protected void onDestroy() {
+    if (activeCamera != null) {
+        try {
+            activeCamera.getCameraControl().enableTorch(false);
+        } catch (Exception ignored) {}
+    }
+
+    if (shutterSound != null) {
+        shutterSound.release();
+        shutterSound = null;
+    }
+
+    ex.shutdown();
+
+    super.onDestroy();
+}
     }
     void select(int i) {
         if (i < 0 || i >= frames.size()) { sel = -1; review = false; }
