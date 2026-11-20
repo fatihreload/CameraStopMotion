@@ -1,10 +1,9 @@
-# Stop Motion Studio – Premium Landscape UI
+# Stop Motion Pro 4.0 – Premium Landscape
 
-Versi ini merombak tata letak layar kamera ke desain landscape premium dengan header studio, panel alat kiri, kontrol capture kanan, dan timeline frame di bagian bawah. Logika kamera, chroma key, timer, onion-skin, edit frame, playback, dan ekspor MP4 tetap dipertahankan.
+Fitur: kamera landscape, pengambilan dan pengelolaan frame, onion-skin, chroma key, timer, filter warna (Original/B&W/Sepia/Vintage/Cool/Warm), gambar foreground/overlay dengan transparansi, aspect ratio (16:9/4:3/1:1/9:16), pilihan ukuran output SD/HD/HQ/4K, dan ekspor MP4.
 
-## Build APK melalui GitHub Actions
-1. Ekstrak ZIP ini.
-2. Unggah seluruh isi folder proyek ke repository GitHub (branch `main`), timpa file versi lama.
-3. Buka tab **Actions** dan jalankan workflow **Build APK** (atau tunggu build otomatis).
-4. Setelah selesai, unduh artifact **StopMotionStudio-apk**.
-5. Instal `app-debug.apk` di HP. Versi aplikasi dinaikkan menjadi 3.0.
+## Catatan kualitas
+Pilihan SD/HD/HQ/4K menentukan resolusi render frame dan ekspor. Karena preview internal kamera diproses pada 1024×576, pilihan HQ dan 4K dapat berupa pembesaran (upscaling), bukan detail optik native 1080p/4K. Dukungan encoding 4K bergantung pada perangkat Android.
+
+## Build APK
+Unggah seluruh isi folder project ke branch `main` di GitHub. Jalankan workflow **Build APK** dari tab Actions, lalu unduh artifact `StopMotionStudio-apk`.

@@ -37,7 +37,10 @@ public class MainActivity extends AppCompatActivity {
     final ExecutorService ex = Executors.newSingleThreadExecutor();
     Bitmap onionBmp, playBmp;
     int keyMode, sens = 50, soft = 30, delay, fps = 8, bright, bgColor = 0xFF2B2F6B, pi;
-    boolean onion = true, playing, front, counting;
+    // Output quality: SD/HD/HQ/4K. These are rendered/export dimensions.
+    int quality = 1, filterMode = 0, aspectMode = 0, foregroundAlpha = 65;
+    boolean onion = true, playing, front, counting, foregroundVisible = true;
+    Bitmap foregroundBmp;
     VF vf; TextView cnt, cd; View left, right; LinearLayout strip; HorizontalScrollView hs; ScrollView drawer;
     View[] pnl; TextView[] tabs; int cur = -1, con = 100, sat = 100, sel = -1; boolean review, loop = true; Bitmap thumb;
     final Map<byte[], Bitmap> thumbs = new IdentityHashMap<>();
@@ -54,6 +57,18 @@ public class MainActivity extends AppCompatActivity {
             if ((playing || review) && playBmp != null) c.drawBitmap(playBmp, null, d, p);
             else synchronized (live) { c.drawBitmap(live, null, d, p); }
             if (!playing && !review && onion && onionBmp != null) { p.setAlpha(100); c.drawBitmap(onionBmp, null, d, p); p.setAlpha(255); }
+            if (!playing && !review && foregroundVisible && foregroundBmp != null) {
+                p.setAlpha(Math.max(0, Math.min(255, foregroundAlpha * 255 / 100)));
+                c.drawBitmap(foregroundBmp, null, d, p); p.setAlpha(255);
+            }
+            // Aspect-ratio guide: darken outside the selected crop and outline the frame.
+            RectF crop = previewCrop(d);
+            if (aspectMode != 0) {
+                g.setStyle(Paint.Style.FILL); g.setColor(0x88000000);
+                c.drawRect(d.left, d.top, d.right, crop.top, g); c.drawRect(d.left, crop.bottom, d.right, d.bottom, g);
+                c.drawRect(d.left, crop.top, crop.left, crop.bottom, g); c.drawRect(crop.right, crop.top, d.right, crop.bottom, g);
+            }
+            g.setColor(0xFFFFB547); g.setStyle(Paint.Style.STROKE); g.setStrokeWidth(2); c.drawRect(crop, g);
             g.setColor(0x44FFFFFF); g.setStrokeWidth(2);
             for (int i = 1; i < 3; i++) {
                 c.drawLine(l + w * i / 3, t, l + w * i / 3, t + hh, g);
@@ -64,6 +79,24 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    float aspectValue() { return new float[]{16f/9f, 4f/3f, 1f, 9f/16f}[aspectMode]; }
+    RectF previewCrop(RectF bounds) {
+        float ar = aspectValue(), bw = bounds.width(), bh = bounds.height();
+        float w = bw, hh = bh;
+        if (w / hh > ar) w = hh * ar; else hh = w / ar;
+        float l = bounds.centerX() - w / 2f, t = bounds.centerY() - hh / 2f;
+        return new RectF(l, t, l + w, t + hh);
+    }
+    int[] outputSize() {
+        int longSide = new int[]{640, 1280, 1920, 3840}[quality];
+        switch (aspectMode) {
+            case 1: return new int[]{longSide, longSide * 3 / 4};
+            case 2: return new int[]{longSide, longSide};
+            case 3: return new int[]{longSide * 9 / 16, longSide};
+            default: return new int[]{longSide, longSide * 9 / 16};
+        }
+    }
+    String outputSizeLabel() { int[] z = outputSize(); return z[0] + " × " + z[1]; }
     int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
     void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_LONG).show(); }
 
@@ -78,9 +111,10 @@ public class MainActivity extends AppCompatActivity {
         if (android.os.Build.VERSION.SDK_INT >= 21) { b.setElevation(dp(2)); b.setBackgroundTintList(null); }
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.setMargins(dp(4), dp(4), dp(4), dp(4)); b.setLayoutParams(lp); return b;
     }
-    TextView cycle(String label, String[] o, IntConsumer f) {
-        final int[] i = {0};
-        final TextView b = chip(label + o[0], null);
+    TextView cycle(String label, String[] o, IntConsumer f) { return cycleAt(label, o, f, 0); }
+    TextView cycleAt(String label, String[] o, IntConsumer f, int initial) {
+        final int[] i = {Math.max(0, Math.min(initial, o.length - 1))};
+        final TextView b = chip(label + o[i[0]], null);
         b.setOnClickListener(v -> { i[0] = (i[0] + 1) % o.length; b.setText(label + o[i[0]]); f.accept(i[0]); });
         return b;
     }
@@ -128,6 +162,15 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    ActivityResultLauncher<String> pickForeground = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
+        if (uri == null) return;
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            Bitmap src = BitmapFactory.decodeStream(in);
+            if (src == null) throw new IOException("Format gambar tidak didukung");
+            foregroundBmp = src.copy(Bitmap.Config.ARGB_8888, false);
+            foregroundVisible = true; vf.invalidate(); toast("Foreground berhasil dimuat");
+        } catch (Exception e) { toast("Foreground tidak bisa dibuka"); }
+    });
     ActivityResultLauncher<String> pickImg = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
         if (uri == null) return;
         try (InputStream in = getContentResolver().openInputStream(uri)) {
@@ -158,7 +201,15 @@ public class MainActivity extends AppCompatActivity {
             panel(heading("CHROMA KEY", 13, 0xFFFFB547), cycle("Kunci: ", new String[]{"Mati", "Hijau", "Biru"}, v -> keyMode = v),
                 seek("Kekuatan kunci", 100, sens, v -> sens = v), seek("Kelembutan tepi", 100, soft, v -> soft = v),
                 row(cycle("Latar: ", new String[]{"Biru tua", "Putih", "Hitam", "Hijau"}, v -> { bgColor = cols[v]; bgPx = null; }), chip("＋ Gambar latar", v -> pickImg.launch("image/*"))),
-                tip("Gunakan kain hijau/biru dengan pencahayaan rata untuk hasil terbaik.")),
+                heading("KUALITAS HASIL", 12, 0xFFFFB547),
+                row(cycleAt("Quality: ", new String[]{"SD", "HD", "HQ", "4K"}, v -> { quality = v; toast("Resolusi output: " + outputSizeLabel()); }, 1),
+                    cycle("Filter: ", new String[]{"Original", "B&W", "Sepia", "Vintage", "Cool", "Warm"}, v -> { filterMode = v; vf.invalidate(); })),
+                heading("ASPECT RATIO", 12, 0xFFFFB547),
+                cycle("Rasio: ", new String[]{"16:9", "4:3", "1:1", "9:16"}, v -> { aspectMode = v; vf.invalidate(); toast("Aspect ratio: " + new String[]{"16:9", "4:3", "1:1", "9:16"}[v]); }),
+                heading("FOREGROUND / OVERLAY", 12, 0xFFFFB547),
+                row(chip("＋ Muat gambar", v -> pickForeground.launch("image/*")), chip("Tampil / Sembunyi", v -> { foregroundVisible = !foregroundVisible; vf.invalidate(); })),
+                seek("Transparansi foreground", 100, foregroundAlpha, v -> { foregroundAlpha = v; vf.invalidate(); }),
+                tip("Foreground adalah gambar PNG/JPG yang ditumpangkan di atas kamera dan ikut tersimpan pada frame. Kualitas mengatur ukuran render ekspor; 4K dapat berupa pembesaran dari preview kamera.")),
             panel(heading("PENGATURAN FRAME", 13, 0xFFFFB547), cycle("Timer: ", new String[]{"Mati", "3 dtk", "5 dtk", "10 dtk"}, v -> delay = new int[]{0, 3, 5, 10}[v]),
                 cycle("Bayangan frame: ", new String[]{"Hidup", "Mati"}, v -> onion = v == 0),
                 tip("Bayangan frame membantu mengatur gerakan antar-frame dengan lebih presisi.")),
@@ -255,7 +306,7 @@ public class MainActivity extends AppCompatActivity {
             m.postTranslate(-src.getWidth() / 2f, -src.getHeight() / 2f); m.postRotate(rot);
             m.postScale(front ? -s : s, s); m.postTranslate(W / 2f, H / 2f);
             tc.drawColor(0xFF000000); tc.drawBitmap(src, m, null);
-            tmp.getPixels(px, 0, W, 0, 0, W, H); key(px);
+            tmp.getPixels(px, 0, W, 0, 0, W, H); key(px); applyFilter(px);
             synchronized (live) { live.setPixels(px, 0, W, 0, 0, W, H); }
             vf.postInvalidate();
         } finally { ip.close(); }
@@ -285,6 +336,42 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    void applyFilter(int[] p) {
+        int mode = filterMode;
+        if (mode == 0) return;
+        for (int i = 0; i < p.length; i++) {
+            int c = p[i], r = c >> 16 & 255, g = c >> 8 & 255, b = c & 255;
+            int nr = r, ng = g, nb = b;
+            if (mode == 1) { int y = (int)(.299f*r + .587f*g + .114f*b); nr = ng = nb = y; }
+            else if (mode == 2 || mode == 3) {
+                nr = cl((int)(.393f*r + .769f*g + .189f*b));
+                ng = cl((int)(.349f*r + .686f*g + .168f*b));
+                nb = cl((int)(.272f*r + .534f*g + .131f*b));
+                if (mode == 3) { nr = cl((nr - 128) * 1.12f + 128); ng = cl((ng - 128) * 1.08f + 128); }
+            } else if (mode == 4) { nr = cl(r * .82f); ng = cl(g * .96f + 5); nb = cl(b * 1.16f + 8); }
+            else if (mode == 5) { nr = cl(r * 1.12f + 8); ng = cl(g * 1.04f + 3); nb = cl(b * .82f); }
+            p[i] = 0xFF000000 | nr << 16 | ng << 8 | nb;
+        }
+    }
+    Bitmap makeCaptureBitmap() {
+        Bitmap base;
+        synchronized (live) { base = live.copy(Bitmap.Config.ARGB_8888, false); }
+        if (foregroundVisible && foregroundBmp != null) {
+            Canvas c = new Canvas(base); Paint fp = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+            fp.setAlpha(foregroundAlpha * 255 / 100);
+            c.drawBitmap(foregroundBmp, null, new Rect(0, 0, W, H), fp);
+        }
+        float ar = aspectValue(); int cw = W, ch = H;
+        if (cw / (float) ch > ar) cw = Math.round(ch * ar); else ch = Math.round(cw / ar);
+        int left = (W - cw) / 2, top = (H - ch) / 2;
+        Bitmap cropped = Bitmap.createBitmap(base, left, top, cw, ch);
+        if (cropped != base) base.recycle();
+        int[] size = outputSize();
+        Bitmap out = Bitmap.createScaledBitmap(cropped, size[0], size[1], true);
+        if (out != cropped) cropped.recycle();
+        return out;
+    }
+
     // frame & timer
     void shoot() {
         if (playing || counting) return;
@@ -297,8 +384,12 @@ public class MainActivity extends AppCompatActivity {
     void snap() {
         if (frames.size() >= MAXF) { toast("Maksimal " + MAXF + " frame"); return; }
         ByteArrayOutputStream o = new ByteArrayOutputStream();
-        synchronized (live) { live.compress(Bitmap.CompressFormat.JPEG, 92, o); onionBmp = live.copy(Bitmap.Config.ARGB_8888, false); thumb = Bitmap.createScaledBitmap(live, 160, 90, true); }
+        Bitmap capture = makeCaptureBitmap();
+        capture.compress(Bitmap.CompressFormat.JPEG, 95, o);
+        onionBmp = capture.copy(Bitmap.Config.ARGB_8888, false);
+        thumb = Bitmap.createScaledBitmap(capture, 160, 90, true); capture.recycle();
         byte[] jb = o.toByteArray(); frames.add(jb); thumbs.put(jb, thumb); review = false; sel = frames.size() - 1; refreshStrip();
+        toast("Frame disimpan · " + outputSizeLabel());
     }
     void select(int i) {
         if (i < 0 || i >= frames.size()) { sel = -1; review = false; }
@@ -351,13 +442,13 @@ public class MainActivity extends AppCompatActivity {
     // ekspor MP4 ke galeri (Movies/StopMotion), berjalan sebanyak durasi video
     void export() {
         if (frames.isEmpty()) { toast("Ambil frame dulu"); return; }
-        stopPlay(); final int f = fps; final List<byte[]> fr = new ArrayList<>(frames);
-        toast("Mengekspor... tunggu sampai ada pesan selesai");
+        stopPlay(); final int f = fps; final List<byte[]> fr = new ArrayList<>(frames); final int[] outSize = outputSize();
+        toast("Mengekspor " + outputSizeLabel() + "...");
         new Thread(() -> {
             try {
-                MediaFormat mf = MediaFormat.createVideoFormat("video/avc", W, H);
+                MediaFormat mf = MediaFormat.createVideoFormat("video/avc", outSize[0], outSize[1]);
                 mf.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-                mf.setInteger(MediaFormat.KEY_BIT_RATE, 8000000); mf.setInteger(MediaFormat.KEY_FRAME_RATE, f);
+                mf.setInteger(MediaFormat.KEY_BIT_RATE, quality == 3 ? 24000000 : quality == 2 ? 12000000 : quality == 1 ? 6000000 : 2500000); mf.setInteger(MediaFormat.KEY_FRAME_RATE, f);
                 mf.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
                 MediaCodec enc = MediaCodec.createEncoderByType("video/avc");
                 enc.configure(mf, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
@@ -371,7 +462,7 @@ public class MainActivity extends AppCompatActivity {
                 MediaCodec.BufferInfo bi = new MediaCodec.BufferInfo(); int[] tr = {-1};
                 for (int k = 0; k <= fr.size(); k++) {
                     byte[] d = fr.get(Math.min(k, fr.size() - 1)); Bitmap bm = BitmapFactory.decodeByteArray(d, 0, d.length);
-                    Canvas c = sf.lockCanvas(null); c.drawBitmap(bm, 0, 0, null); sf.unlockCanvasAndPost(c); bm.recycle();
+                    Canvas c = sf.lockCanvas(null); c.drawBitmap(bm, null, new Rect(0, 0, outSize[0], outSize[1]), null); sf.unlockCanvasAndPost(c); bm.recycle();
                     drain(enc, mx, bi, tr, false); Thread.sleep(1000 / f);
                 }
                 enc.signalEndOfInputStream(); drain(enc, mx, bi, tr, true);
