@@ -227,13 +227,14 @@ public class MainActivity extends AppCompatActivity {
             panel(heading("EDIT", 13, 0xFFFFB547), seek("Kecerahan", 100, 50, v -> bright = (v - 50) * 2),
                 seek("Kontras", 100, 50, v -> con = v * 2), seek("Saturasi", 100, 50, v -> sat = v * 2),
                 row(cycle("FPS: ", new String[]{"8", "4", "12", "24"}, v -> fps = new int[]{8, 4, 12, 24}[v]), cycle("Ulang: ", new String[]{"Ya", "Tidak"}, v -> loop = v == 0)),
-                row(chip("Hapus frame", v -> delSel()), chip("Duplikat", v -> dupSel())),
-                row(chip("← Geser", v -> moveSel(-1)), chip("Geser →", v -> moveSel(1))),
-                row(chip("Balik urutan", v -> revAll()), chip("Hapus semua", v -> clearAll())),
+                row(chip("Duplikat", v -> dupSel()), chip("← Geser", v -> moveSel(-1))),
+                row(chip("Geser →", v -> moveSel(1)), chip("Balik urutan", v -> revAll())),
                 tip("Pilih thumbnail untuk meninjau frame. Tekan thumbnail sekali lagi untuk kembali ke kamera.")),
             panel(heading("EXPORT VIDEO", 13, 0xFFFFB547),
                 chip("⬇ EXPORT VIDEO MP4", v -> export()),
-                tip("Video MP4 akan disimpan ke galeri pada folder Movies/StopMotion."))};
+                tip("Video MP4 akan disimpan ke galeri pada folder Movies/StopMotion."),
+                heading("HAPUS FRAME", 12, 0xFFFFB547),
+                row(chip("HAPUS FRAME", v -> delSel()), chip("HAPUS SEMUA", v -> confirmClearAll())))};
         FrameLayout holder = new FrameLayout(this);
         for (View v : pnl) { v.setVisibility(View.GONE); holder.addView(v); }
         drawer = new ScrollView(this); drawer.setFillViewport(true); drawer.setPadding(dp(5), dp(5), dp(5), dp(5));
@@ -261,7 +262,6 @@ public class MainActivity extends AppCompatActivity {
         shut.setBackground(shutterBg()); shut.setOnClickListener(v -> { review = false; shoot(); });
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(66), dp(66)); sp.setMargins(0, dp(14), 0, dp(14)); rc.addView(shut, sp);
         TextView captureLabel = heading("CAPTURE", 9, 0xFFFFB547); captureLabel.setGravity(Gravity.CENTER); rc.addView(captureLabel);
-        rc.addView(mb("↺", "Kembali / Ulangi dari awal", v -> replayProject()));
         playPauseButton = mb("▶", "Play / Jeda", v -> togglePlay());
         rc.addView(playPauseButton);
         rc.addView(mb("⟳", "Balik kamera", v -> { front = !front; startCam(); }));
@@ -593,15 +593,6 @@ public class MainActivity extends AppCompatActivity {
         if (autoCaptureButton != null) { autoCaptureButton.setText("▶ MULAI FOTO OTOMATIS"); autoCaptureButton.setBackground(shape(0xFF202630, 14)); }
     }
 
-    void replayProject() {
-        if (frames.isEmpty()) { toast("Belum ada frame untuk diulang"); return; }
-        stopPlay();
-        pi = 0;
-        paused = false;
-        review = false;
-        togglePlay();
-        toast("Memutar project dari frame pertama");
-    }
     void tick(int n) {
         if (n == 0) { cd.setText(""); counting = false; snap(); return; }
         cd.setText(String.valueOf(n)); h.postDelayed(() -> tick(n - 1), 1000);
@@ -640,7 +631,7 @@ public class MainActivity extends AppCompatActivity {
     }
     void delSel() {
         stopPlay(); if (frames.isEmpty()) return;
-        int i = sel >= 0 ? sel : frames.size() - 1; frames.remove(i);
+        int i = sel >= 0 ? sel : frames.size() - 1; byte[] removed = frames.remove(i); thumbs.remove(removed);
         sel = frames.isEmpty() ? -1 : Math.min(i, frames.size() - 1); after();
     }
     void dupSel() {
@@ -652,6 +643,14 @@ public class MainActivity extends AppCompatActivity {
         Collections.swap(frames, sel, j); sel = j; after();
     }
     void revAll() { stopPlay(); Collections.reverse(frames); if (sel >= 0) sel = frames.size() - 1 - sel; after(); }
+    void confirmClearAll() {
+        new AlertDialog.Builder(this)
+            .setTitle("Hapus semua frame?")
+            .setMessage("Semua frame dalam project ini akan dihapus. Tindakan ini tidak bisa dibatalkan.")
+            .setNegativeButton("BATAL", (d, w) -> d.dismiss())
+            .setPositiveButton("HAPUS SEMUA", (d, w) -> clearAll())
+            .show();
+    }
     void clearAll() { stopPlay(); frames.clear(); thumbs.clear(); sel = -1; review = false; after(); }
 
     // putar
