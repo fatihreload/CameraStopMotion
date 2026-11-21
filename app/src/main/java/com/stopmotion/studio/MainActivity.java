@@ -662,36 +662,51 @@ void updateFlashButton() {
         if (n == 0) { cd.setText(""); counting = false; snap(); return; }
         cd.setText(String.valueOf(n)); h.postDelayed(() -> tick(n - 1), 1000);
     }
-    void snap() {
-        if (frames.size() >= MAXF) { toast("Maksimal " + MAXF + " frame"); return; }
-		if (shutterSound != null) {
-    shutterSound.play(MediaActionSound.SHUTTER_CLICK);
-}
+       void snap() {
+        if (frames.size() >= MAXF) {
+            toast("Maksimal " + MAXF + " frame");
+            return;
+        }
+
+        if (shutterSound != null) {
+            shutterSound.play(MediaActionSound.SHUTTER_CLICK);
+        }
+
         ByteArrayOutputStream o = new ByteArrayOutputStream();
         Bitmap capture = makeCaptureBitmap();
         capture.compress(Bitmap.CompressFormat.JPEG, 95, o);
         onionBmp = capture.copy(Bitmap.Config.ARGB_8888, false);
-        thumb = Bitmap.createScaledBitmap(capture, 160, 90, true); capture.recycle();
-        byte[] jb = o.toByteArray(); frames.add(jb); thumbs.put(jb, thumb); review = false; sel = frames.size() - 1; refreshStrip();
+        thumb = Bitmap.createScaledBitmap(capture, 160, 90, true);
+        capture.recycle();
+
+        byte[] jb = o.toByteArray();
+        frames.add(jb);
+        thumbs.put(jb, thumb);
+        review = false;
+        sel = frames.size() - 1;
+        refreshStrip();
+
         toast("Frame disimpan · " + outputSizeLabel());
-		@Override
-protected void onDestroy() {
-    if (activeCamera != null) {
-        try {
-            activeCamera.getCameraControl().enableTorch(false);
-        } catch (Exception ignored) {}
     }
 
-    if (shutterSound != null) {
-        shutterSound.release();
-        shutterSound = null;
+    @Override
+    protected void onDestroy() {
+        if (activeCamera != null) {
+            try {
+                activeCamera.getCameraControl().enableTorch(false);
+            } catch (Exception ignored) {
+            }
+        }
+
+        if (shutterSound != null) {
+            shutterSound.release();
+            shutterSound = null;
+        }
+
+        ex.shutdown();
+        super.onDestroy();
     }
 
-    ex.shutdown();
-
-    super.onDestroy();
-}
-    }
     void select(int i) {
         if (i < 0 || i >= frames.size()) { sel = -1; review = false; }
         else { sel = i; byte[] d = frames.get(i); playBmp = BitmapFactory.decodeByteArray(d, 0, d.length); review = true; }
