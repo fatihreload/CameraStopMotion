@@ -39,10 +39,6 @@ public class MainActivity extends AppCompatActivity {
     final int[] px = new int[W * H];
     int[] bgPx;
     final List<byte[]> frames = new ArrayList<>();
-    static class TimelineState { final ArrayList<byte[]> frames; final int selected; TimelineState(List<byte[]> f, int s) { frames = new ArrayList<>(f); selected = s; } }
-    final Deque<TimelineState> undoStack = new ArrayDeque<>(), redoStack = new ArrayDeque<>();
-    int transitionMode = 0; // 0 none, 1 crossfade
-    List<byte[]> playSequence = new ArrayList<>();
     final Handler h = new Handler(Looper.getMainLooper());
     final ExecutorService ex = Executors.newSingleThreadExecutor();
     Bitmap onionBmp, playBmp;
@@ -57,7 +53,7 @@ public class MainActivity extends AppCompatActivity {
 	TextView flashButton;
     int autoRemaining = 0;
     Bitmap foregroundBmp;
-    VF vf; TextView cnt, cd, projectTitle, qualityTool, aspectTool, foregroundTool, filterTool, playPauseButton; View left, right; LinearLayout strip; HorizontalScrollView hs, topTools; ScrollView drawer;
+    VF vf; TextView cnt, cd, projectTitle, qualityTool, aspectTool, foregroundTool, filterTool, playPauseButton, topToolsToggle; View left, right; LinearLayout strip; HorizontalScrollView hs, topTools; ScrollView drawer; boolean topToolsVisible = true;
     View[] pnl; TextView[] tabs; TextView autoCaptureButton; int cur = -1, con = 100, sat = 100, sel = -1; boolean review, loop = true; Bitmap thumb;
     final Map<byte[], Bitmap> thumbs = new IdentityHashMap<>();
     final List<TextView> mi = new ArrayList<>(); final List<String[]> mlabel = new ArrayList<>(); boolean labels;
@@ -237,11 +233,9 @@ public class MainActivity extends AppCompatActivity {
             panel(heading("EDIT", 13, 0xFFFFB547), seek("Kecerahan", 100, 50, v -> bright = (v - 50) * 2),
                 seek("Kontras", 100, 50, v -> con = v * 2), seek("Saturasi", 100, 50, v -> sat = v * 2),
                 row(cycle("FPS: ", new String[]{"8", "4", "12", "24"}, v -> fps = new int[]{8, 4, 12, 24}[v]), cycle("Ulang: ", new String[]{"Ya", "Tidak"}, v -> loop = v == 0)),
-                row(chip("↶ Undo", v -> undo()), chip("↷ Redo", v -> redo())),
                 chip("Duplikat", v -> dupSel()),
                 tip("Pilih thumbnail untuk meninjau frame. Tekan thumbnail sekali lagi untuk kembali ke kamera.")),
             panel(heading("EXPORT VIDEO", 13, 0xFFFFB547),
-                cycle("Transisi: ", new String[]{"Mati", "Fade"}, v -> transitionMode = v),
                 chip("⬇ EXPORT VIDEO MP4", v -> export()),
                 tip("Video MP4 akan disimpan ke galeri pada folder Movies/StopMotion."),
                 heading("HAPUS FRAME", 12, 0xFFFFB547),
@@ -302,7 +296,18 @@ public class MainActivity extends AppCompatActivity {
             toolRow.addView(item, new LinearLayout.LayoutParams(-2, -2));
         }
         topTools = new HorizontalScrollView(this); topTools.setHorizontalScrollBarEnabled(false); topTools.setFillViewport(false); topTools.addView(toolRow);
-        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-1, dp(50), Gravity.TOP); tp.setMargins(dp(82), dp(8), dp(112), 0); root.addView(topTools, tp);
+        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-1, dp(50), Gravity.TOP); tp.setMargins(dp(82), dp(8), dp(160), 0); root.addView(topTools, tp);
+        topToolsToggle = chip("⌃", v -> {
+            topToolsVisible = !topToolsVisible;
+            topTools.setVisibility(topToolsVisible ? View.VISIBLE : View.GONE);
+            topToolsToggle.setText(topToolsVisible ? "⌃" : "⌄");
+            topToolsToggle.setContentDescription(topToolsVisible ? "Sembunyikan menu atas" : "Tampilkan menu atas");
+        });
+        topToolsToggle.setTextSize(18);
+        topToolsToggle.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams toggleLp = new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.TOP | Gravity.END);
+        toggleLp.setMargins(0, dp(8), dp(110), 0);
+        root.addView(topToolsToggle, toggleLp);
         FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); cp.topMargin = dp(66); root.addView(cnt, cp);
 
         FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(300), -1, Gravity.START); dl.setMargins(dp(78), dp(116), 0, dp(82)); root.addView(drawer, dl);
@@ -369,7 +374,7 @@ public class MainActivity extends AppCompatActivity {
             props.setProperty("bright", String.valueOf(bright)); props.setProperty("con", String.valueOf(con)); props.setProperty("sat", String.valueOf(sat));
             props.setProperty("foregroundAlpha", String.valueOf(foregroundAlpha)); props.setProperty("foregroundVisible", String.valueOf(foregroundVisible));
             props.setProperty("onion", String.valueOf(onion)); props.setProperty("loop", String.valueOf(loop));
-            props.setProperty("bgColor", String.valueOf(bgColor)); props.setProperty("transitionMode", String.valueOf(transitionMode));
+            props.setProperty("bgColor", String.valueOf(bgColor));
             zip.putNextEntry(new ZipEntry("project.properties")); props.store(zip, "Stop Motion Project"); zip.closeEntry();
             for (int i = 0; i < frames.size(); i++) {
                 zip.putNextEntry(new ZipEntry(String.format(Locale.US, "frames/frame_%04d.png", i)));
@@ -399,7 +404,7 @@ public class MainActivity extends AppCompatActivity {
             if (loaded.isEmpty()) throw new IOException("Project tidak berisi frame");
             if (loaded.size() > MAXF) throw new IOException("Project melebihi batas " + MAXF + " frame");
             stopPlay(); stopAutoCapture(); counting = false; h.removeCallbacksAndMessages(null);
-            frames.clear(); thumbs.clear(); undoStack.clear(); redoStack.clear(); frames.addAll(loaded); sel = -1; review = false; playBmp = null; onionBmp = null;
+            frames.clear(); thumbs.clear(); frames.addAll(loaded); sel = -1; review = false; playBmp = null; onionBmp = null;
             projectName = props.getProperty("projectName", "Imported Project");
             quality = readInt(props, "quality", 1, 0, 3); filterMode = readInt(props, "filterMode", 0, 0, 5);
             aspectMode = readInt(props, "aspectMode", 0, 0, 3); fps = readInt(props, "fps", 8, 1, 60);
@@ -410,7 +415,6 @@ public class MainActivity extends AppCompatActivity {
             foregroundVisible = Boolean.parseBoolean(props.getProperty("foregroundVisible", "false"));
             onion = Boolean.parseBoolean(props.getProperty("onion", "true")); loop = Boolean.parseBoolean(props.getProperty("loop", "true"));
             try { bgColor = Integer.parseInt(props.getProperty("bgColor", String.valueOf(0xFF2B2F6B))); } catch (Exception ignored) { bgColor = 0xFF2B2F6B; }
-            transitionMode = readInt(props, "transitionMode", 0, 0, 1); undoStack.clear(); redoStack.clear();
             foregroundBmp = loadedForeground; bgPx = null;
             for (byte[] data : frames) {
                 Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length);
@@ -439,7 +443,7 @@ public class MainActivity extends AppCompatActivity {
                 if (entered.isEmpty()) { toast("Masukkan nama project"); return; }
                 Runnable create = () -> {
                     stopPlay(); stopAutoCapture(); counting = false; h.removeCallbacksAndMessages(null);
-                    frames.clear(); thumbs.clear(); undoStack.clear(); redoStack.clear(); sel = -1; review = false; playing = false; onionBmp = null; playBmp = null;
+                    frames.clear(); thumbs.clear(); sel = -1; review = false; playing = false; onionBmp = null; playBmp = null;
                     projectName = entered; if (projectTitle != null) projectTitle.setText(projectName);
                     quality = 1; filterMode = 0; aspectMode = 0; foregroundVisible = false; foregroundAlpha = 65; foregroundBmp = null;
                     qualityTool.setText("QUALITY  ·  HD"); aspectTool.setText("ASPECT  ·  16:9");
@@ -719,7 +723,6 @@ void updateFlashButton() {
             shutterSound.play(MediaActionSound.SHUTTER_CLICK);
         }
 
-        recordUndo();
         ByteArrayOutputStream o = new ByteArrayOutputStream();
         Bitmap capture = makeCaptureBitmap();
         capture.compress(Bitmap.CompressFormat.PNG, 100, o);
@@ -777,21 +780,13 @@ void updateFlashButton() {
         if (frames.isEmpty()) onionBmp = null; else { byte[] d = frames.get(frames.size() - 1); onionBmp = BitmapFactory.decodeByteArray(d, 0, d.length); }
         if (review && sel >= 0) select(sel); else { review = false; refreshStrip(); vf.invalidate(); }
     }
-    void recordUndo() { undoStack.push(new TimelineState(frames, sel)); if (undoStack.size() > 40) undoStack.removeLast(); redoStack.clear(); }
-    void restoreState(TimelineState state) {
-        frames.clear(); frames.addAll(state.frames); sel = state.selected; thumbs.clear();
-        for (byte[] data : frames) { Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length); if (b != null) { thumbs.put(data, Bitmap.createScaledBitmap(b, 160, 90, true)); b.recycle(); } }
-        review = false; playBmp = null; after();
-    }
-    void undo() { if (undoStack.isEmpty()) { toast("Tidak ada perubahan untuk dibatalkan"); return; } redoStack.push(new TimelineState(frames, sel)); restoreState(undoStack.pop()); toast("Undo"); }
-    void redo() { if (redoStack.isEmpty()) { toast("Tidak ada perubahan untuk diulang"); return; } undoStack.push(new TimelineState(frames, sel)); restoreState(redoStack.pop()); toast("Redo"); }
     void delSel() {
-        stopPlay(); if (frames.isEmpty()) return; recordUndo();
+        stopPlay(); if (frames.isEmpty()) return;
         int i = sel >= 0 ? sel : frames.size() - 1; byte[] removed = frames.remove(i); thumbs.remove(removed);
         sel = frames.isEmpty() ? -1 : Math.min(i, frames.size() - 1); after();
     }
     void dupSel() {
-        stopPlay(); if (frames.isEmpty() || frames.size() >= MAXF) return; recordUndo();
+        stopPlay(); if (frames.isEmpty() || frames.size() >= MAXF) return;
         int i = sel >= 0 ? sel : frames.size() - 1; frames.add(i + 1, frames.get(i)); sel = i + 1; after();
     }
     void moveSel(int dir) {
@@ -807,14 +802,13 @@ void updateFlashButton() {
             .setPositiveButton("HAPUS SEMUA", (d, w) -> clearAll())
             .show();
     }
-    void clearAll() { stopPlay(); if (!frames.isEmpty()) recordUndo(); frames.clear(); thumbs.clear(); sel = -1; review = false; after(); }
+    void clearAll() { stopPlay(); frames.clear(); thumbs.clear(); sel = -1; review = false; after(); }
 
     // putar
     final Runnable pl = new Runnable() { public void run() {
         if (!playing || frames.isEmpty()) return;
-        if (playSequence.isEmpty()) playSequence = buildPlaybackSequence(frames, transitionMode);
-        if (pi >= playSequence.size()) { if (!loop) { stopPlay(); vf.invalidate(); return; } pi = 0; }
-        byte[] d = playSequence.get(pi++); playBmp = BitmapFactory.decodeByteArray(d, 0, d.length);
+        if (!loop && pi >= frames.size()) { stopPlay(); vf.invalidate(); return; }
+        byte[] d = frames.get(pi++ % frames.size()); playBmp = BitmapFactory.decodeByteArray(d, 0, d.length);
         vf.invalidate(); h.postDelayed(this, 1000 / fps);
     } };
     // Satu tombol berganti antara Play dan Jeda. Resume mempertahankan posisi frame.
@@ -829,7 +823,7 @@ void updateFlashButton() {
             return;
         }
         if (frames.isEmpty()) { toast("Ambil frame dulu"); return; }
-        if (!paused) { pi = 0; playSequence = buildPlaybackSequence(frames, transitionMode); }
+        if (!paused) pi = 0;
         review = false;
         paused = false;
         playing = true;
@@ -858,34 +852,10 @@ void updateFlashButton() {
         updatePlayPauseButton();
     }
 
-    // Membuat sequence playback/ekspor dengan frame sela untuk efek Fade.
-    List<byte[]> buildPlaybackSequence(List<byte[]> source, int mode) {
-        List<byte[]> result = new ArrayList<>(); if (source.isEmpty()) return result;
-        result.addAll(source);
-        if (mode != 1 || source.size() < 2) return result;
-        result.clear(); final int steps = 3;
-        for (int i = 0; i < source.size(); i++) {
-            byte[] aBytes = source.get(i); result.add(aBytes);
-            if (i == source.size() - 1) continue;
-            Bitmap a = BitmapFactory.decodeByteArray(aBytes, 0, aBytes.length);
-            byte[] bBytes = source.get(i + 1); Bitmap b = BitmapFactory.decodeByteArray(bBytes, 0, bBytes.length);
-            if (a == null || b == null) { if (a != null) a.recycle(); if (b != null) b.recycle(); continue; }
-            Bitmap scaled = b.getWidth() == a.getWidth() && b.getHeight() == a.getHeight() ? b : Bitmap.createScaledBitmap(b, a.getWidth(), a.getHeight(), true);
-            int[] ap = new int[a.getWidth() * a.getHeight()], bp = new int[ap.length]; a.getPixels(ap, 0, a.getWidth(), 0, 0, a.getWidth(), a.getHeight()); scaled.getPixels(bp, 0, a.getWidth(), 0, 0, a.getWidth(), a.getHeight());
-            for (int step = 1; step <= steps; step++) {
-                float t = step / (float)(steps + 1); int[] out = new int[ap.length];
-                for (int q = 0; q < out.length; q++) { int x=ap[q], y=bp[q]; int aa=(int)(((x>>>24)&255)*(1-t)+((y>>>24)&255)*t); int r=(int)(((x>>>16)&255)*(1-t)+((y>>>16)&255)*t); int g=(int)(((x>>>8)&255)*(1-t)+((y>>>8)&255)*t); int bl=(int)((x&255)*(1-t)+(y&255)*t); out[q]=(aa<<24)|(r<<16)|(g<<8)|bl; }
-                Bitmap mid = Bitmap.createBitmap(a.getWidth(), a.getHeight(), Bitmap.Config.ARGB_8888); mid.setPixels(out,0,a.getWidth(),0,0,a.getWidth(),a.getHeight()); ByteArrayOutputStream os = new ByteArrayOutputStream(); mid.compress(Bitmap.CompressFormat.PNG,100,os); result.add(os.toByteArray()); mid.recycle();
-            }
-            a.recycle(); if (scaled != b) scaled.recycle(); b.recycle();
-        }
-        return result;
-    }
-
     // ekspor MP4 ke galeri (Movies/StopMotion), berjalan sebanyak durasi video
     void export() {
         if (frames.isEmpty()) { toast("Ambil frame dulu"); return; }
-        stopPlay(); final int f = fps; final List<byte[]> fr = buildPlaybackSequence(frames, transitionMode); final int[] outSize = outputSize();
+        stopPlay(); final int f = fps; final List<byte[]> fr = new ArrayList<>(frames); final int[] outSize = outputSize();
         toast("Mengekspor " + outputSizeLabel() + "...");
         new Thread(() -> {
             try {
@@ -903,8 +873,8 @@ void updateFlashButton() {
                 ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(u, "w");
                 MediaMuxer mx = new MediaMuxer(pfd.getFileDescriptor(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
                 MediaCodec.BufferInfo bi = new MediaCodec.BufferInfo(); int[] tr = {-1};
-                for (int k = 0; k < fr.size(); k++) {
-                    byte[] d = fr.get(k); Bitmap bm = BitmapFactory.decodeByteArray(d, 0, d.length);
+                for (int k = 0; k <= fr.size(); k++) {
+                    byte[] d = fr.get(Math.min(k, fr.size() - 1)); Bitmap bm = BitmapFactory.decodeByteArray(d, 0, d.length);
                     Canvas c = sf.lockCanvas(null); c.drawBitmap(bm, null, new Rect(0, 0, outSize[0], outSize[1]), null); sf.unlockCanvasAndPost(c); bm.recycle();
                     drain(enc, mx, bi, tr, false); Thread.sleep(1000 / f);
                 }
