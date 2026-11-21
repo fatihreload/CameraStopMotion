@@ -41,6 +41,7 @@ public class MainActivity extends AppCompatActivity {
     final List<byte[]> frames = new ArrayList<>();
     final Handler h = new Handler(Looper.getMainLooper());
     final ExecutorService ex = Executors.newSingleThreadExecutor();
+    Toast activeToast;
     Bitmap onionBmp, playBmp;
     int keyMode, sens = 50, soft = 30, delay, fps = 8, bright, bgColor = 0xFF2B2F6B, pi;
     // Output quality: SD/HD/HQ/4K. These are rendered/export dimensions.
@@ -110,7 +111,14 @@ public class MainActivity extends AppCompatActivity {
     }
     String outputSizeLabel() { int[] z = outputSize(); return z[0] + " × " + z[1]; }
     int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
-    void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_SHORT).show(); }
+    void toast(String s) {
+        // Replace the previous message instead of letting Toasts queue behind one another.
+        runOnUiThread(() -> {
+            if (activeToast != null) activeToast.cancel();
+            activeToast = Toast.makeText(getApplicationContext(), s, Toast.LENGTH_SHORT);
+            activeToast.show();
+        });
+    }
 
     android.graphics.drawable.GradientDrawable shape(int color, int r) {
         android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
@@ -306,9 +314,9 @@ public class MainActivity extends AppCompatActivity {
         topToolsToggle.setTextSize(18);
         topToolsToggle.setGravity(Gravity.CENTER);
         FrameLayout.LayoutParams toggleLp = new FrameLayout.LayoutParams(dp(44), dp(36), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        toggleLp.topMargin = dp(58);
+        toggleLp.topMargin = dp(60);
         root.addView(topToolsToggle, toggleLp);
-        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); cp.topMargin = dp(66); root.addView(cnt, cp);
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); cp.topMargin = dp(100); root.addView(cnt, cp);
 
         FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(300), -1, Gravity.START); dl.setMargins(dp(78), dp(116), 0, dp(82)); root.addView(drawer, dl);
         FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM); hl.setMargins(dp(78), 0, dp(112), dp(8)); root.addView(hs, hl);
