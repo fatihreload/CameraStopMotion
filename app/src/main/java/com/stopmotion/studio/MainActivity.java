@@ -328,8 +328,7 @@ public class MainActivity extends AppCompatActivity {
         openProject.setSingleLine(true);
         openProject.setMinWidth(dp(142));
         openProject.setPadding(dp(12), dp(8), dp(12), dp(8));
-        TextView newProject = chip("＋ NEW PROJECT", v -> newProjectDialog());
-        for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, openProject, newProject}) {
+        for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, openProject}) {
             toolRow.addView(item, new LinearLayout.LayoutParams(-2, -2));
         }
         topTools = new HorizontalScrollView(this);
