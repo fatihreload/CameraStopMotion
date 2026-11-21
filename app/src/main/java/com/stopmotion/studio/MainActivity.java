@@ -575,6 +575,12 @@ public class MainActivity extends AppCompatActivity {
                 a
             );
 
+            // Paksa pembesaran awal ke 1x. Perangkat yang tidak mendukung zoom ratio
+            // akan tetap memakai zoom default CameraX.
+            try {
+                activeCamera.getCameraControl().setZoomRatio(1.0f);
+            } catch (Exception ignored) { }
+
             if (flashOn) {
                 if (!front && activeCamera.getCameraInfo().hasFlashUnit()) {
                     activeCamera.getCameraControl().enableTorch(true);
@@ -627,7 +633,10 @@ void updateFlashButton() {
             Bitmap src = ip.toBitmap(); int rot = ip.getImageInfo().getRotationDegrees();
             boolean sw = rot % 180 != 0;
             float rw = sw ? src.getHeight() : src.getWidth(), rh = sw ? src.getWidth() : src.getHeight();
-            float s = Math.max(W / rw, H / rh);
+            // Fit-center: tampilkan seluruh bidang kamera tanpa crop tambahan.
+            // Sebelumnya max() memenuhi kanvas 16:9 dengan memotong gambar sensor
+            // (sering tampak seperti zoom sekitar 1.3x pada sensor 4:3).
+            float s = Math.min(W / rw, H / rh);
             Matrix m = new Matrix();
             m.postTranslate(-src.getWidth() / 2f, -src.getHeight() / 2f); m.postRotate(rot);
             m.postScale(front ? -s : s, s); m.postTranslate(W / 2f, H / 2f);
