@@ -298,7 +298,8 @@ public class MainActivity extends AppCompatActivity {
         aspectTool = chip("ASPECT · 16:9", v -> chooseAspect());
         foregroundTool = chip("FOREGROUND · OFF", v -> foregroundMenu(v));
         filterTool = chip("FILTER · ORIGINAL", v -> chooseFilter());
-        TextView openProject = chip("📂 OPEN PROJECT", v -> openProjectDialog());\n        openProject.setPadding(dp(9), dp(8), dp(9), dp(8));
+        TextView openProject = chip("📂 OPEN PROJECT", v -> openProjectDialog());
+        openProject.setPadding(dp(9), dp(8), dp(9), dp(8));
         TextView newProject = chip("＋ NEW PROJECT", v -> newProjectDialog());
         for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, openProject, newProject}) {
             toolRow.addView(item, new LinearLayout.LayoutParams(-2, -2));
