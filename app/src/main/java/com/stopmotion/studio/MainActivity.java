@@ -33,6 +33,7 @@ import java.util.zip.ZipOutputStream;
 public class MainActivity extends AppCompatActivity {
     static final int W = 1024, H = 576, MAXF = 200;
     final Bitmap live = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
+    final Bitmap rawLive = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
     final Bitmap tmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
     final Canvas tc = new Canvas(tmp);
     final int[] px = new int[W * H];
@@ -263,8 +264,12 @@ public class MainActivity extends AppCompatActivity {
         TextView saveProjectTop = mb("💾", "Simpan Project", v -> saveProjectDialog());
         rc.addView(saveProjectTop);
         rc.addView(mb("⛶", "Layar penuh", v -> { left.setVisibility(View.GONE); hs.setVisibility(View.GONE); if (cur >= 0) openTab(cur); }));
-		flashButton = mb("⚡ OFF", "Flash kamera ON / OFF", v -> toggleFlash());
-		rc.addView(flashButton);
+		flashButton = mb("⚡", "Flash kamera ON / OFF", v -> toggleFlash());
+        flashButton.setTextSize(12);
+        LinearLayout.LayoutParams flashLp = new LinearLayout.LayoutParams(dp(44), dp(34));
+        flashLp.gravity = Gravity.CENTER;
+        flashLp.topMargin = dp(3); flashLp.bottomMargin = dp(3);
+        rc.addView(flashButton, flashLp);
         TextView shut = new TextView(this); shut.setText("●"); shut.setTextSize(36); shut.setTextColor(0xFFFFFFFF); shut.setGravity(Gravity.CENTER);
         shut.setBackground(shutterBg()); shut.setOnClickListener(v -> { review = false; shoot(); });
         LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(66), dp(66)); sp.setMargins(0, dp(14), 0, dp(14)); rc.addView(shut, sp);
@@ -362,7 +367,7 @@ public class MainActivity extends AppCompatActivity {
             props.setProperty("bgColor", String.valueOf(bgColor));
             zip.putNextEntry(new ZipEntry("project.properties")); props.store(zip, "Stop Motion Project"); zip.closeEntry();
             for (int i = 0; i < frames.size(); i++) {
-                zip.putNextEntry(new ZipEntry(String.format(Locale.US, "frames/frame_%04d.jpg", i)));
+                zip.putNextEntry(new ZipEntry(String.format(Locale.US, "frames/frame_%04d.png", i)));
                 zip.write(frames.get(i)); zip.closeEntry();
             }
             if (foregroundBmp != null) {
@@ -382,7 +387,7 @@ public class MainActivity extends AppCompatActivity {
                 while ((n = zip.read(buf)) > 0) out.write(buf, 0, n);
                 String name = entry.getName(); byte[] data = out.toByteArray();
                 if (name.equals("project.properties")) props.load(new ByteArrayInputStream(data));
-                else if (name.startsWith("frames/") && name.endsWith(".jpg")) loaded.add(data);
+                else if (name.startsWith("frames/") && (name.endsWith(".jpg") || name.endsWith(".png"))) loaded.add(data);
                 else if (name.equals("foreground.png")) loadedForeground = BitmapFactory.decodeByteArray(data, 0, data.length);
                 zip.closeEntry();
             }
@@ -531,7 +536,9 @@ void updateFlashButton() {
             m.postTranslate(-src.getWidth() / 2f, -src.getHeight() / 2f); m.postRotate(rot);
             m.postScale(front ? -s : s, s); m.postTranslate(W / 2f, H / 2f);
             tc.drawColor(0xFF000000); tc.drawBitmap(src, m, null);
-            tmp.getPixels(px, 0, W, 0, 0, W, H); key(px); applyFilter(px);
+            tmp.getPixels(px, 0, W, 0, 0, W, H);
+            synchronized (rawLive) { rawLive.setPixels(px, 0, W, 0, 0, W, H); }
+            key(px); applyFilter(px);
             synchronized (live) { live.setPixels(px, 0, W, 0, 0, W, H); }
             vf.postInvalidate();
         } finally { ip.close(); }
@@ -575,12 +582,46 @@ void updateFlashButton() {
                 if (mode == 3) { nr = cl((nr - 128) * 1.12f + 128); ng = cl((ng - 128) * 1.08f + 128); }
             } else if (mode == 4) { nr = cl(r * .82f); ng = cl(g * .96f + 5); nb = cl(b * 1.16f + 8); }
             else if (mode == 5) { nr = cl(r * 1.12f + 8); ng = cl(g * 1.04f + 3); nb = cl(b * .82f); }
-            p[i] = 0xFF000000 | nr << 16 | ng << 8 | nb;
+            p[i] = (c & 0xFF000000) | nr << 16 | ng << 8 | nb;
         }
     }
+    // Ambil frame asli, lalu jadikan warna hijau/biru transparan sebelum disimpan.
+    void applyTransparentKey(int[] p) {
+        int km = keyMode;
+        int T = (int) (80 - sens * .7), E = (int) (soft * .8 + 1);
+        int br = bright;
+        float c = con / 100f, sa = sat / 100f;
+        boolean adj = br != 0 || con != 100 || sat != 100;
+        for (int i = 0; i < p.length; i++) {
+            int cc = p[i], r = cc >> 16 & 255, g = cc >> 8 & 255, b = cc & 255;
+            int a = 255;
+            if (km > 0) {
+                int sc = km == 1 ? g - Math.max(r, b) : b - Math.max(r, g);
+                if (sc >= T + E) a = 0;
+                else if (sc > T) a = Math.round(255f * (T + E - sc) / E);
+                // Kurangi pantulan hijau/biru di tepi subjek.
+                if (sc > 0) {
+                    if (km == 1) g = Math.max(r, b);
+                    else b = Math.max(r, g);
+                }
+            }
+            if (adj) {
+                float rf = (r - 128) * c + 128 + br, gf = (g - 128) * c + 128 + br, bf = (b - 128) * c + 128 + br;
+                float y = .299f * rf + .587f * gf + .114f * bf;
+                r = cl(y + (rf - y) * sa); g = cl(y + (gf - y) * sa); b = cl(y + (bf - y) * sa);
+            }
+            p[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        }
+    }
+
     Bitmap makeCaptureBitmap() {
         Bitmap base;
-        synchronized (live) { base = live.copy(Bitmap.Config.ARGB_8888, false); }
+        synchronized (rawLive) { base = rawLive.copy(Bitmap.Config.ARGB_8888, true); }
+        int[] capturePixels = new int[W * H];
+        base.getPixels(capturePixels, 0, W, 0, 0, W, H);
+        applyTransparentKey(capturePixels);
+        applyFilter(capturePixels);
+        base.setPixels(capturePixels, 0, W, 0, 0, W, H);
         if (foregroundVisible && foregroundBmp != null) {
             Canvas c = new Canvas(base); Paint fp = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
             fp.setAlpha(foregroundAlpha * 255 / 100);
@@ -674,7 +715,7 @@ void updateFlashButton() {
 
         ByteArrayOutputStream o = new ByteArrayOutputStream();
         Bitmap capture = makeCaptureBitmap();
-        capture.compress(Bitmap.CompressFormat.JPEG, 95, o);
+        capture.compress(Bitmap.CompressFormat.PNG, 100, o);
         onionBmp = capture.copy(Bitmap.Config.ARGB_8888, false);
         thumb = Bitmap.createScaledBitmap(capture, 160, 90, true);
         capture.recycle();
