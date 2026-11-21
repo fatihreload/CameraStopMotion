@@ -3,7 +3,18 @@ package com.stopmotion.studio;
 import android.Manifest;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.*;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.text.SpannableString;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.StyleSpan;
 import android.media.*;
 import android.net.Uri;
 import android.os.*;
@@ -26,6 +37,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.IntConsumer;
+import java.util.function.IntFunction;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -54,8 +66,6 @@ public class MainActivity extends AppCompatActivity {
 	TextView flashButton;
     int autoRemaining = 0;
     Bitmap foregroundBmp;
-    Bitmap editorImageBmp;
-    String titleText = "", creditText = "";
     VF vf; TextView cnt, cd, projectTitle, qualityTool, aspectTool, foregroundTool, filterTool, playPauseButton, topToolsToggle; View left, right; LinearLayout strip, topToolsPanel; HorizontalScrollView hs, topTools; ScrollView drawer; boolean topToolsVisible = true;
     View[] pnl; TextView[] tabs; TextView autoCaptureButton; int cur = -1, con = 100, sat = 100, sel = -1; boolean review, loop = true; Bitmap thumb;
     final Map<byte[], Bitmap> thumbs = new IdentityHashMap<>();
@@ -122,52 +132,177 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    android.graphics.drawable.GradientDrawable shape(int color, int r) {
-        android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
-        d.setColor(color); d.setCornerRadius(dp(r)); return d;
+    // ───────────────────────── Design tokens ─────────────────────────
+    static final int C_BG = 0xFF090C12, C_GLASS = 0xE60E131B, C_SURF = 0xFF1A212C,
+        C_LINE = 0x2EFFFFFF, C_ACC = 0xFFFFB020, C_ACC2 = 0xFFFFD27A, C_DANGER = 0xFFE5484D,
+        C_OK = 0xFF3DD68C, C_TXT = 0xFFF2F4F8, C_MUTE = 0xFF8E9AAE, C_DARK = 0xFF171B23;
+    static final int EX = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE;
+
+    GradientDrawable box(int color, int r, int stroke) { return box(color, r, stroke, 1); }
+    GradientDrawable box(int color, int r, int stroke, int strokeDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color); d.setCornerRadius(dp(r));
+        if (stroke != 0) d.setStroke(dp(strokeDp), stroke);
+        return d;
     }
+    GradientDrawable shape(int color, int r) { return box(color, r, 0); }
+    GradientDrawable gradient(int from, int to, int r) {
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{from, to});
+        g.setCornerRadius(dp(r)); return g;
+    }
+    // Efek riak (ripple) yang terpotong mengikuti sudut membulat.
+    Drawable fx(Drawable base, int r) {
+        return new RippleDrawable(ColorStateList.valueOf(0x40FFFFFF), base, box(0xFFFFFFFF, r, 0));
+    }
+    // Efek menyusut halus saat tombol ditekan.
+    void pressFx(View v) {
+        v.setOnTouchListener((x, e) -> {
+            int a = e.getAction();
+            if (a == MotionEvent.ACTION_DOWN) x.animate().scaleX(0.95f).scaleY(0.95f).setDuration(80).start();
+            else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_CANCEL) x.animate().scaleX(1f).scaleY(1f).setDuration(120).start();
+            return false;
+        });
+    }
+    // kind: 0 biasa · 1 utama (aksen) · 2 bahaya (outline) · 3 bahaya (solid) · 4 aksen (outline)
+    void style(TextView b, int kind) {
+        final int r = 14;
+        switch (kind) {
+            case 1: b.setBackground(fx(gradient(C_ACC2, C_ACC, r), r)); b.setTextColor(C_DARK); break;
+            case 2: b.setBackground(fx(box(0x22E5484D, r, 0x66E5484D), r)); b.setTextColor(0xFFFF8A8E); break;
+            case 3: b.setBackground(fx(box(C_DANGER, r, 0), r)); b.setTextColor(0xFFFFFFFF); break;
+            case 4: b.setBackground(fx(box(0x22FFB020, r, 0x88FFB020), r)); b.setTextColor(C_ACC2); break;
+            default: b.setBackground(fx(box(C_SURF, r, C_LINE), r)); b.setTextColor(C_TXT);
+        }
+    }
+    // Tombol pada rail kiri/kanan. state: 0 biasa · 1 aktif · 2 bahaya/merah
+    void rail(TextView t, int state) {
+        final int r = 14;
+        if (state == 1) { t.setBackground(fx(gradient(C_ACC2, C_ACC, r), r)); t.setTextColor(C_DARK); }
+        else if (state == 2) { t.setBackground(fx(box(C_DANGER, r, 0), r)); t.setTextColor(0xFFFFFFFF); }
+        else { t.setBackground(fx(box(0x14FFFFFF, r, 0), r)); t.setTextColor(C_TXT); }
+    }
+    CharSequence twoTone(String label, String value) {
+        SpannableStringBuilder s = new SpannableStringBuilder();
+        if (label.length() > 0) { s.append(label); s.setSpan(new ForegroundColorSpan(C_MUTE), 0, s.length(), EX); }
+        int st = s.length(); s.append(value);
+        s.setSpan(new ForegroundColorSpan(C_ACC2), st, s.length(), EX);
+        s.setSpan(new StyleSpan(Typeface.BOLD), st, s.length(), EX);
+        return s;
+    }
+    // Teks toolbar atas: label kecil redup + nilai tebal berwarna + panah dropdown.
+    void setTool(TextView t, String label, String value) {
+        if (t == null) return;
+        SpannableStringBuilder s = new SpannableStringBuilder(label + "  ");
+        s.setSpan(new ForegroundColorSpan(C_MUTE), 0, s.length(), EX);
+        s.setSpan(new RelativeSizeSpan(0.82f), 0, s.length(), EX);
+        int st = s.length(); s.append(value);
+        int col = value.equals("ON") ? C_OK : value.equals("OFF") ? C_MUTE : C_ACC2;
+        s.setSpan(new ForegroundColorSpan(col), st, s.length(), EX);
+        s.setSpan(new StyleSpan(Typeface.BOLD), st, s.length(), EX);
+        int ar = s.length(); s.append("  ▾");
+        s.setSpan(new ForegroundColorSpan(C_MUTE), ar, s.length(), EX);
+        t.setText(s);
+    }
+    void setFg() { setTool(foregroundTool, "FOREGROUND", foregroundVisible ? "ON" : "OFF"); }
+    CharSequence countText(int n) {
+        SpannableStringBuilder s = new SpannableStringBuilder("● ");
+        s.setSpan(new ForegroundColorSpan(C_ACC), 0, 1, EX);
+        int a = s.length(); s.append(String.valueOf(n));
+        s.setSpan(new ForegroundColorSpan(C_TXT), a, s.length(), EX);
+        s.setSpan(new RelativeSizeSpan(1.2f), a, s.length(), EX);
+        int c = s.length(); s.append("/" + MAXF + "  FRAME" + (n == 1 ? "" : "S"));
+        s.setSpan(new ForegroundColorSpan(C_MUTE), c, s.length(), EX);
+        return s;
+    }
+
     TextView chip(String t, View.OnClickListener l) {
-        TextView b = new TextView(this); b.setText(t); b.setTextSize(12); b.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        b.setTextColor(0xFFF2F4F8); b.setGravity(Gravity.CENTER); b.setPadding(dp(13), dp(10), dp(13), dp(10));
-        b.setBackground(shape(0xFF202630, 14)); b.setOnClickListener(l); b.setMinHeight(dp(42));
-        if (android.os.Build.VERSION.SDK_INT >= 21) { b.setElevation(dp(2)); b.setBackgroundTintList(null); }
+        TextView b = new TextView(this); b.setText(t); b.setTextSize(12); b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        b.setGravity(Gravity.CENTER); b.setPadding(dp(13), dp(10), dp(13), dp(10)); b.setMinHeight(dp(42));
+        style(b, 0); b.setOnClickListener(l); pressFx(b);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.setMargins(dp(4), dp(4), dp(4), dp(4)); b.setLayoutParams(lp); return b;
     }
+    TextView chipS(String t, int kind, View.OnClickListener l) { TextView c = chip(t, l); style(c, kind); return c; }
     TextView cycle(String label, String[] o, IntConsumer f) { return cycleAt(label, o, f, 0); }
     TextView cycleAt(String label, String[] o, IntConsumer f, int initial) {
         final int[] i = {Math.max(0, Math.min(initial, o.length - 1))};
-        final TextView b = chip(label + o[i[0]], null);
-        b.setOnClickListener(v -> { i[0] = (i[0] + 1) % o.length; b.setText(label + o[i[0]]); f.accept(i[0]); });
+        final TextView b = chip("", null);
+        b.setText(twoTone(label, o[i[0]]));
+        b.setOnClickListener(v -> { i[0] = (i[0] + 1) % o.length; b.setText(twoTone(label, o[i[0]])); f.accept(i[0]); });
         return b;
     }
-    TextView tip(String t) { TextView x = new TextView(this); x.setText(t); x.setTextSize(11); x.setTextColor(0xFF9AA5B5); x.setPadding(dp(7), dp(8), dp(7), dp(4)); return x; }
-    LinearLayout row(View... v) { LinearLayout r = new LinearLayout(this); for (View x : v) r.addView(x); return r; }
+    // Catatan kecil bergaya kartu.
+    TextView tip(String t) {
+        TextView x = new TextView(this); x.setText(t); x.setTextSize(11); x.setTextColor(C_MUTE); x.setLineSpacing(0f, 1.1f);
+        x.setPadding(dp(12), dp(9), dp(12), dp(9)); x.setBackground(box(0x0FFFFFFF, 12, 0)); return x;
+    }
+    // Judul seksi dengan garis aksen di kiri.
+    View title(String t) {
+        LinearLayout r = new LinearLayout(this); r.setGravity(Gravity.CENTER_VERTICAL); r.setPadding(dp(2), dp(8), dp(2), dp(4));
+        View bar = new View(this); bar.setBackground(box(C_ACC, 2, 0));
+        r.addView(bar, new LinearLayout.LayoutParams(dp(3), dp(14)));
+        TextView tv = new TextView(this); tv.setText(t); tv.setTextSize(12); tv.setTextColor(C_TXT);
+        tv.setTypeface(Typeface.DEFAULT, Typeface.BOLD); tv.setLetterSpacing(0.1f); tv.setPadding(dp(8), 0, 0, 0);
+        r.addView(tv); return r;
+    }
+    // Baris tombol: setiap anak berbagi lebar sama rata.
+    LinearLayout row(View... v) {
+        LinearLayout r = new LinearLayout(this);
+        for (View x : v) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1f);
+            if (x.getLayoutParams() instanceof ViewGroup.MarginLayoutParams) {
+                ViewGroup.MarginLayoutParams m = (ViewGroup.MarginLayoutParams) x.getLayoutParams();
+                lp.setMargins(m.leftMargin, m.topMargin, m.rightMargin, m.bottomMargin);
+            }
+            r.addView(x, lp);
+        }
+        return r;
+    }
     LinearLayout panel(View... v) {
-        LinearLayout c = new LinearLayout(this); c.setOrientation(LinearLayout.VERTICAL); c.setPadding(dp(14), dp(12), dp(14), dp(12));
-        c.setBackground(shape(0xFF151B24, 18));
-        for (View x : v) { LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = dp(5); c.addView(x, lp); }
+        LinearLayout c = new LinearLayout(this); c.setOrientation(LinearLayout.VERTICAL); c.setPadding(dp(10), dp(6), dp(10), dp(10));
+        for (View x : v) { LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = dp(6); c.addView(x, lp); }
         return c;
     }
-    View seek(String label, int max, int val, IntConsumer f) {
-        LinearLayout r = new LinearLayout(this); r.setOrientation(LinearLayout.VERTICAL); r.setPadding(dp(4), dp(4), dp(4), dp(2));
-        TextView t = new TextView(this); t.setText(label); t.setTextSize(11); t.setTextColor(0xFF8F939B);
+    View seek(String label, int max, int val, IntConsumer f) { return seek(label, max, val, p -> p + "%", f); }
+    View seek(String label, int max, int val, IntFunction<String> fmt, IntConsumer f) {
+        LinearLayout r = new LinearLayout(this); r.setOrientation(LinearLayout.VERTICAL); r.setPadding(dp(6), dp(6), dp(6), dp(2));
+        r.setBackground(box(0x0FFFFFFF, 12, 0));
+        LinearLayout top = new LinearLayout(this); top.setGravity(Gravity.CENTER_VERTICAL);
+        TextView t = new TextView(this); t.setText(label); t.setTextSize(11); t.setTextColor(C_MUTE);
+        final TextView vt = new TextView(this); vt.setText(fmt.apply(val)); vt.setTextSize(11); vt.setTextColor(C_ACC2); vt.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        top.addView(t, new LinearLayout.LayoutParams(0, -2, 1f)); top.addView(vt);
+        top.setPadding(dp(6), 0, dp(6), 0);
         SeekBar s = new SeekBar(this); s.setMax(max); s.setProgress(val);
-        s.getProgressDrawable().setTint(0xFFFFB020); s.getThumb().setTint(0xFFFFB020);
+        s.setProgressTintList(ColorStateList.valueOf(C_ACC)); s.setThumbTintList(ColorStateList.valueOf(C_ACC2));
+        s.setProgressBackgroundTintList(ColorStateList.valueOf(0x33FFFFFF));
         s.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            public void onProgressChanged(SeekBar x, int p, boolean u) { f.accept(p); }
+            public void onProgressChanged(SeekBar x, int p, boolean u) { vt.setText(fmt.apply(p)); f.accept(p); }
             public void onStartTrackingTouch(SeekBar x) {}
             public void onStopTrackingTouch(SeekBar x) {}
         });
-        r.addView(t); r.addView(s); return r;
+        r.addView(top); r.addView(s); return r;
+    }
+    View divider() {
+        View v = new View(this); v.setBackgroundColor(C_LINE);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(28), dp(1)); lp.setMargins(0, dp(6), 0, dp(6)); lp.gravity = Gravity.CENTER_HORIZONTAL;
+        v.setLayoutParams(lp); return v;
+    }
+    // Rail dibungkus ScrollView agar tetap bisa di-scroll pada layar landscape yang pendek.
+    ScrollView railScroll(View content) {
+        ScrollView sv = new ScrollView(this); sv.setFillViewport(true); sv.setVerticalScrollBarEnabled(false);
+        sv.setOverScrollMode(View.OVER_SCROLL_NEVER); sv.setBackground(box(C_GLASS, 22, C_LINE)); sv.setClipToOutline(true);
+        sv.addView(content, new FrameLayout.LayoutParams(-1, -2)); return sv;
     }
     TextView mb(String icon, String name, View.OnClickListener l) {
-        TextView t = chip(icon, l); mi.add(t); mlabel.add(new String[]{icon, name}); return t;
+        TextView t = chip(icon, l); rail(t, 0);
+        ((LinearLayout.LayoutParams) t.getLayoutParams()).setMargins(dp(4), dp(3), dp(4), dp(3));
+        mi.add(t); mlabel.add(new String[]{icon, name}); return t;
     }
     void refreshMenus() {
         for (int i = 0; i < mi.size(); i++) {
             TextView t = mi.get(i); String[] l = mlabel.get(i);
-            t.setText(labels ? l[0] + "  " + l[1] : l[0]); t.setTextSize(labels ? 13 : 20);
-            t.setPadding(dp(labels ? 12 : 0), dp(6), dp(labels ? 12 : 0), dp(6)); t.setMinWidth(dp(labels ? 100 : 46)); t.setMinHeight(dp(46));
+            t.setText(labels ? l[0] + "  " + l[1] : l[0]); t.setTextSize(labels ? 12 : 20);
+            t.setGravity(labels ? (Gravity.CENTER_VERTICAL | Gravity.START) : Gravity.CENTER);
+            t.setPadding(dp(labels ? 12 : 0), dp(6), dp(labels ? 12 : 0), dp(6)); t.setMinWidth(dp(labels ? 100 : 46)); t.setMinHeight(dp(44));
         }
         int lw = dp(labels ? 132 : 64), rw = dp(labels ? 142 : 88);
         left.getLayoutParams().width = lw; right.getLayoutParams().width = rw;
@@ -180,7 +315,7 @@ public class MainActivity extends AppCompatActivity {
         drawer.setVisibility(cur < 0 ? View.GONE : View.VISIBLE);
         for (int j = 0; j < pnl.length; j++) {
             pnl[j].setVisibility(j == cur ? View.VISIBLE : View.GONE);
-            tabs[j].setBackground(shape(j == cur ? 0xFFFFB020 : 0xFF2A2C32, 18)); tabs[j].setTextColor(j == cur ? 0xFF000000 : 0xFFECEBE6);
+            rail(tabs[j], j == cur ? 1 : 0);
         }
     }
 
@@ -190,7 +325,7 @@ public class MainActivity extends AppCompatActivity {
             Bitmap src = BitmapFactory.decodeStream(in);
             if (src == null) throw new IOException("Format gambar tidak didukung");
             foregroundBmp = src.copy(Bitmap.Config.ARGB_8888, false);
-            foregroundVisible = true; if (foregroundTool != null) foregroundTool.setText("FOREGROUND  ·  ON"); vf.invalidate(); toast("Foreground berhasil dimuat");
+            foregroundVisible = true; setFg(); vf.invalidate(); toast("Foreground berhasil dimuat");
         } catch (Exception e) { toast("Foreground tidak bisa dibuka"); }
     });
     ActivityResultLauncher<String> pickImg = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
@@ -204,46 +339,6 @@ public class MainActivity extends AppCompatActivity {
             int[] a = new int[W * H]; o.getPixels(a, 0, W, 0, 0, W, H); bgPx = a;
         } catch (Exception e) { toast("Gambar tidak bisa dibuka"); }
     });
-    ActivityResultLauncher<String> pickEditorImage = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
-        if (uri == null) return;
-        try (InputStream in = getContentResolver().openInputStream(uri)) {
-            Bitmap src = BitmapFactory.decodeStream(in);
-            if (src == null) throw new IOException("Format gambar tidak didukung");
-            editorImageBmp = src.copy(Bitmap.Config.ARGB_8888, false); vf.invalidate(); toast("Gambar video dimuat");
-        } catch (Exception e) { toast("Gambar tidak bisa dibuka"); }
-    });
-    void editOverlayText(boolean title) {
-        EditText input = new EditText(this); input.setText(title ? titleText : creditText); input.setHint(title ? "Teks judul" : "Nama / credit");
-        new AlertDialog.Builder(this).setTitle(title ? "Judul video" : "Credit video").setView(input)
-            .setNegativeButton("Batal", null).setPositiveButton("Simpan", (d, w) -> {
-                if (title) titleText = input.getText().toString().trim(); else creditText = input.getText().toString().trim();
-                toast(title ? "Judul disimpan" : "Credit disimpan"); vf.invalidate();
-            }).show();
-    }
-    Bitmap composeExportFrame(byte[] data, int outW, int outH) {
-        Bitmap bm = BitmapFactory.decodeByteArray(data, 0, data.length);
-        if (bm == null) return Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
-        Bitmap out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
-        Canvas c = new Canvas(out); Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
-        c.drawBitmap(bm, null, new Rect(0, 0, outW, outH), p); bm.recycle();
-        if (editorImageBmp != null) {
-            float maxW = outW * .28f, maxH = outH * .28f;
-            float scale = Math.min(maxW / editorImageBmp.getWidth(), maxH / editorImageBmp.getHeight());
-            int iw = Math.max(1, Math.round(editorImageBmp.getWidth() * scale)), ih = Math.max(1, Math.round(editorImageBmp.getHeight() * scale));
-            c.drawBitmap(editorImageBmp, null, new Rect(outW - iw - outW / 30, outH - ih - outH / 30, outW - outW / 30, outH - outH / 30), p);
-        }
-        drawExportText(c, titleText, outW, outH, true);
-        drawExportText(c, creditText, outW, outH, false);
-        return out;
-    }
-    void drawExportText(Canvas c, String text, int w, int h, boolean title) {
-        if (text == null || text.trim().isEmpty()) return;
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG); p.setColor(Color.WHITE); p.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        p.setTextAlign(Paint.Align.CENTER); p.setTextSize(Math.max(24, w * (title ? .055f : .032f)));
-        p.setShadowLayer(5, 2, 2, Color.BLACK);
-        float y = title ? h * .13f : h * .92f; c.drawText(text, w / 2f, y, p);
-    }
-
     ActivityResultLauncher<String> askCam = registerForActivityResult(new ActivityResultContracts.RequestPermission(), ok -> {
         if (ok) startCam(); else toast("Izin kamera diperlukan");
     });
@@ -264,114 +359,106 @@ public class MainActivity extends AppCompatActivity {
     View glassPanel() { View v = new View(this); v.setBackground(shape(0xD910151D, 18)); if (Build.VERSION.SDK_INT >= 21) v.setElevation(dp(8)); return v; }
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
-        getWindow().setStatusBarColor(0xFF090C12); getWindow().setNavigationBarColor(0xFF090C12);
+        getWindow().setStatusBarColor(C_BG); getWindow().setNavigationBarColor(C_BG);
         vf = new VF(this);
         vf.setOnClickListener(v -> { left.setVisibility(View.VISIBLE); hs.setVisibility(View.VISIBLE); });
         final int[] cols = {0xFF2B2F6B, 0xFFFFFFFF, 0xFF000000, 0xFF2E7D32};
+        autoCaptureButton = chipS("▶ MULAI FOTO OTOMATIS", 1, v -> toggleAutoCapture());
         pnl = new View[]{
-            panel(heading("CHROMA KEY", 13, 0xFFFFB547), cycle("Kunci: ", new String[]{"Mati", "Hijau", "Biru"}, v -> keyMode = v),
+            panel(title("CHROMA KEY"), cycle("Kunci: ", new String[]{"Mati", "Hijau", "Biru"}, v -> keyMode = v),
                 seek("Kekuatan kunci", 100, sens, v -> sens = v), seek("Kelembutan tepi", 100, soft, v -> soft = v),
                 row(cycle("Latar: ", new String[]{"Biru tua", "Putih", "Hitam", "Hijau"}, v -> { bgColor = cols[v]; bgPx = null; }), chip("＋ Gambar latar", v -> pickImg.launch("image/*"))),
-                heading("FOREGROUND / OVERLAY", 12, 0xFFFFB547),
-                row(chip("＋ Muat gambar", v -> pickForeground.launch("image/*")), chip("Tampil / Sembunyi", v -> { foregroundVisible = !foregroundVisible; if (foregroundTool != null) foregroundTool.setText(foregroundVisible ? "FOREGROUND  ·  ON" : "FOREGROUND  ·  OFF"); vf.invalidate(); })),
+                title("FOREGROUND / OVERLAY"),
+                row(chip("＋ Muat gambar", v -> pickForeground.launch("image/*")), chip("Tampil / Sembunyi", v -> { foregroundVisible = !foregroundVisible; setFg(); vf.invalidate(); })),
                 seek("Transparansi foreground", 100, foregroundAlpha, v -> { foregroundAlpha = v; vf.invalidate(); }),
                 tip("Foreground adalah gambar PNG/JPG yang ditumpangkan di atas kamera dan ikut tersimpan pada frame. Kualitas mengatur ukuran render ekspor; 4K dapat berupa pembesaran dari preview kamera.")),
-            panel(heading("PENGATURAN FRAME", 13, 0xFFFFB547), cycle("Timer: ", new String[]{"Mati", "3 dtk", "5 dtk", "10 dtk"}, v -> { delay = new int[]{0, 3, 5, 10}[v]; }),
-                (autoCaptureButton = chip("▶ MULAI FOTO OTOMATIS", v -> toggleAutoCapture())),
+            panel(title("PENGATURAN FRAME"), cycle("Timer: ", new String[]{"Mati", "3 dtk", "5 dtk", "10 dtk"}, v -> { delay = new int[]{0, 3, 5, 10}[v]; }),
+                autoCaptureButton,
                 cycle("Bayangan frame: ", new String[]{"Hidup", "Mati"}, v -> onion = v == 0),
                 tip("Bayangan frame membantu mengatur gerakan antar-frame dengan lebih presisi.")),
-            panel(heading("EDIT", 13, 0xFFFFB547), seek("Kecerahan", 100, 50, v -> bright = (v - 50) * 2),
-                seek("Kontras", 100, 50, v -> con = v * 2), seek("Saturasi", 100, 50, v -> sat = v * 2),
+            panel(title("EDIT"), seek("Kecerahan", 100, 50, v -> (v - 50) * 2 > 0 ? "+" + ((v - 50) * 2) : String.valueOf((v - 50) * 2), v -> bright = (v - 50) * 2),
+                seek("Kontras", 100, 50, v -> (v * 2) + "%", v -> con = v * 2), seek("Saturasi", 100, 50, v -> (v * 2) + "%", v -> sat = v * 2),
                 row(cycle("FPS: ", new String[]{"8", "4", "12", "24"}, v -> fps = new int[]{8, 4, 12, 24}[v]), cycle("Ulang: ", new String[]{"Ya", "Tidak"}, v -> loop = v == 0)),
                 chip("Duplikat", v -> dupSel()),
                 tip("Pilih thumbnail untuk meninjau frame. Tekan thumbnail sekali lagi untuk kembali ke kamera.")),
-            panel(heading("EDITOR VIDEO", 13, 0xFFFFB547),
-                row(chip("＋ Gambar video", v -> pickEditorImage.launch("image/*")), chip("Hapus gambar", v -> { editorImageBmp = null; vf.invalidate(); toast("Gambar video dihapus"); })),
-                chip("Teks judul", v -> editOverlayText(true)),
-                chip("Teks credit", v -> editOverlayText(false)),
-                tip("Gambar, judul, dan credit ditumpangkan pada hasil ekspor. Gambar latar chroma key tetap terpisah.")),
-            panel(heading("EXPORT VIDEO", 13, 0xFFFFB547),
-                chip("⬇ EXPORT VIDEO MP4", v -> export()),
+            panel(title("EXPORT VIDEO"),
+                chipS("⬇ EXPORT VIDEO MP4", 1, v -> export()),
                 tip("Video MP4 akan disimpan ke galeri pada folder Movies/StopMotion."),
-                heading("HAPUS FRAME", 12, 0xFFFFB547),
-                row(chip("HAPUS FRAME", v -> delSel()), chip("HAPUS SEMUA", v -> confirmClearAll())))};
+                title("HAPUS FRAME"),
+                row(chipS("HAPUS FRAME", 2, v -> delSel()), chipS("HAPUS SEMUA", 2, v -> confirmClearAll())))};
         FrameLayout holder = new FrameLayout(this);
         for (View v : pnl) { v.setVisibility(View.GONE); holder.addView(v); }
-        drawer = new ScrollView(this); drawer.setFillViewport(true); drawer.setPadding(dp(5), dp(5), dp(5), dp(5));
-        drawer.setBackground(shape(0xF20D121A, 20)); drawer.addView(holder); drawer.setVisibility(View.GONE);
+        drawer = new ScrollView(this); drawer.setFillViewport(true); drawer.setPadding(dp(6), dp(6), dp(6), dp(6));
+        drawer.setVerticalScrollBarEnabled(false);
+        drawer.setBackground(box(0xF20D121A, 22, C_LINE)); drawer.setClipToOutline(true);
+        drawer.addView(holder); drawer.setVisibility(View.GONE);
 
         String[] tn = {"Layar", "Timer", "Edit", "Export"}, ti = {"◈", "◷", "✎", "⬇"}; tabs = new TextView[4];
         LinearLayout lc = new LinearLayout(this); lc.setOrientation(LinearLayout.VERTICAL); lc.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        lc.setPadding(dp(5), dp(12), dp(5), dp(8)); lc.setBackground(shape(0xD910151D, 20));
-        // Tombol pintas project menggantikan logo S, dengan gradien, garis halus, dan efek tekan.
+        lc.setPadding(dp(5), dp(8), dp(5), dp(8));
+        // Tombol pintas project: gradien aksen, garis halus, dan efek tekan.
         TextView newProjectShortcut = new TextView(this);
-        newProjectShortcut.setText("＋\nNEW\nPROJECT");
+        SpannableString npText = new SpannableString("＋\nNEW\nPROJECT");
+        npText.setSpan(new RelativeSizeSpan(1.9f), 0, 1, EX);
+        newProjectShortcut.setText(npText);
         newProjectShortcut.setTextSize(9);
-        newProjectShortcut.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
-        newProjectShortcut.setTextColor(0xFF171B23);
+        newProjectShortcut.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        newProjectShortcut.setTextColor(C_DARK);
         newProjectShortcut.setGravity(Gravity.CENTER);
         newProjectShortcut.setLineSpacing(0f, 0.9f);
-        android.graphics.drawable.GradientDrawable shortcutBg = new android.graphics.drawable.GradientDrawable(
-                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
-                new int[]{0xFFFFD27A, 0xFFFFA92F});
-        shortcutBg.setCornerRadius(dp(14));
+        GradientDrawable shortcutBg = gradient(C_ACC2, C_ACC, 16);
         shortcutBg.setStroke(dp(1), 0x99FFFFFF);
         newProjectShortcut.setBackground(shortcutBg);
-        newProjectShortcut.setElevation(dp(5));
+        newProjectShortcut.setElevation(dp(4));
         newProjectShortcut.setContentDescription("Buat project baru");
         newProjectShortcut.setOnClickListener(v -> newProjectDialog());
-        newProjectShortcut.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                v.animate().scaleX(0.94f).scaleY(0.94f).setDuration(90).start();
-            } else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
-                v.animate().scaleX(1f).scaleY(1f).setDuration(120).start();
-            }
-            return false;
-        });
-        LinearLayout.LayoutParams bm = new LinearLayout.LayoutParams(dp(52), dp(62));
-        bm.bottomMargin = dp(10);
+        pressFx(newProjectShortcut);
+        LinearLayout.LayoutParams bm = new LinearLayout.LayoutParams(dp(52), dp(58));
+        bm.bottomMargin = dp(4);
         lc.addView(newProjectShortcut, bm);
+        lc.addView(divider());
         lc.addView(mb("☰", "Nama menu", v -> { labels = !labels; refreshMenus(); }));
         for (int i = 0; i < tabs.length; i++) { final int k = i; tabs[i] = mb(ti[i], tn[i], v -> openTab(k)); lc.addView(tabs[i]); }
-        left = lc;
+        left = railScroll(lc);
 
         strip = new LinearLayout(this); strip.setGravity(Gravity.CENTER_VERTICAL); strip.setPadding(dp(5), dp(3), dp(5), dp(3));
-        hs = new HorizontalScrollView(this); hs.setHorizontalScrollBarEnabled(false); hs.setBackground(shape(0xE610151D, 16)); hs.addView(strip);
+        hs = new HorizontalScrollView(this); hs.setHorizontalScrollBarEnabled(false); hs.setBackground(box(C_GLASS, 18, C_LINE)); hs.addView(strip);
 
-        LinearLayout rc = new LinearLayout(this); rc.setOrientation(LinearLayout.VERTICAL); rc.setGravity(Gravity.CENTER); rc.setPadding(dp(5), dp(10), dp(5), dp(10));
-        rc.setBackground(shape(0xD910151D, 20));
+        LinearLayout rc = new LinearLayout(this); rc.setOrientation(LinearLayout.VERTICAL); rc.setGravity(Gravity.CENTER); rc.setPadding(dp(5), dp(8), dp(5), dp(8));
         // Tombol simpan ditempatkan paling atas kanan, tepat di atas menu layar penuh.
         TextView saveProjectTop = mb("💾", "Simpan Project", v -> saveProjectDialog());
         rc.addView(saveProjectTop);
         rc.addView(mb("⛶", "Layar penuh", v -> { left.setVisibility(View.GONE); hs.setVisibility(View.GONE); if (cur >= 0) openTab(cur); }));
-		flashButton = mb("⚡", "Flash kamera ON / OFF", v -> toggleFlash());
-        flashButton.setTextSize(12);
-        LinearLayout.LayoutParams flashLp = new LinearLayout.LayoutParams(dp(44), dp(34));
-        flashLp.gravity = Gravity.CENTER;
-        flashLp.topMargin = dp(3); flashLp.bottomMargin = dp(3);
-        rc.addView(flashButton, flashLp);
-        TextView shut = new TextView(this); shut.setText("●"); shut.setTextSize(36); shut.setTextColor(0xFFFFFFFF); shut.setGravity(Gravity.CENTER);
-        shut.setBackground(shutterBg()); shut.setOnClickListener(v -> { review = false; shoot(); });
-        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(66), dp(66)); sp.setMargins(0, dp(14), 0, dp(14)); rc.addView(shut, sp);
-        TextView captureLabel = heading("CAPTURE", 9, 0xFFFFB547); captureLabel.setGravity(Gravity.CENTER); rc.addView(captureLabel);
+        flashButton = mb("⚡", "Flash", v -> toggleFlash());
+        rc.addView(flashButton);
+        rc.addView(divider());
+        TextView shut = new TextView(this); shut.setGravity(Gravity.CENTER);
+        shut.setBackground(shutterBg()); shut.setContentDescription("Ambil foto");
+        shut.setElevation(dp(6));
+        shut.setOnClickListener(v -> { review = false; shoot(); }); pressFx(shut);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(dp(66), dp(66)); sp.setMargins(0, dp(6), 0, dp(6)); rc.addView(shut, sp);
+        TextView captureLabel = heading("CAPTURE", 9, C_ACC); captureLabel.setLetterSpacing(0.14f); captureLabel.setGravity(Gravity.CENTER); rc.addView(captureLabel);
+        rc.addView(divider());
         playPauseButton = mb("▶", "Play / Jeda", v -> togglePlay());
         rc.addView(playPauseButton);
         rc.addView(mb("⟳", "Balik kamera", v -> { front = !front; startCam(); }));
-        right = rc;
+        right = railScroll(rc);
 
-        cnt = heading("0 FRAME", 12, 0xFFFFC36A); cnt.setGravity(Gravity.CENTER); cnt.setPadding(dp(15), dp(8), dp(15), dp(8)); cnt.setBackground(shape(0xD910151D, 20));
-        cd = new TextView(this); cd.setTextColor(0xFFFFFFFF); cd.setTextSize(90); cd.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD); cd.setGravity(Gravity.CENTER);
+        cnt = heading("0 FRAME", 12, C_ACC2); cnt.setText(countText(0)); cnt.setGravity(Gravity.CENTER); cnt.setPadding(dp(14), dp(7), dp(14), dp(7)); cnt.setBackground(box(C_GLASS, 20, C_LINE));
+        cd = new TextView(this); cd.setTextColor(0xFFFFFFFF); cd.setTextSize(90); cd.setTypeface(Typeface.DEFAULT, Typeface.BOLD); cd.setGravity(Gravity.CENTER);
+        cd.setShadowLayer(dp(10), 0, dp(2), 0xCC000000);
 
-        FrameLayout root = new FrameLayout(this); root.setBackgroundColor(0xFF090C12);
+        FrameLayout root = new FrameLayout(this); root.setBackgroundColor(C_BG);
         root.addView(vf, new FrameLayout.LayoutParams(-1, -1));
         // Toolbar sebagai jendela mengambang; handle ikut bergerak bersama panel.
         LinearLayout toolRow = new LinearLayout(this); toolRow.setGravity(Gravity.CENTER_VERTICAL); toolRow.setPadding(dp(6), dp(2), dp(6), dp(2));
-        toolRow.setBackground(shape(0xE610151D, 16));
-        qualityTool = chip("QUALITY · HD", v -> chooseQuality());
-        aspectTool = chip("ASPECT · 16:9", v -> chooseAspect());
-        foregroundTool = chip("FOREGROUND · OFF", v -> foregroundMenu(v));
-        filterTool = chip("FILTER · ORIGINAL", v -> chooseFilter());
-        TextView openProject = chip("📂 OPEN PROJECT", v -> openProjectDialog());
+        qualityTool = chip("", v -> chooseQuality());
+        aspectTool = chip("", v -> chooseAspect());
+        foregroundTool = chip("", v -> foregroundMenu(v));
+        filterTool = chip("", v -> chooseFilter());
+        setTool(qualityTool, "QUALITY", "HD"); setTool(aspectTool, "ASPECT", "16:9");
+        setFg(); setTool(filterTool, "FILTER", "ORIGINAL");
+        TextView openProject = chipS("📂  OPEN PROJECT", 4, v -> openProjectDialog());
         openProject.setSingleLine(true);
         openProject.setMinWidth(dp(142));
         openProject.setPadding(dp(12), dp(8), dp(12), dp(8));
@@ -388,17 +475,17 @@ public class MainActivity extends AppCompatActivity {
         topToolsPanel = new LinearLayout(this);
         topToolsPanel.setOrientation(LinearLayout.VERTICAL);
         topToolsPanel.setGravity(Gravity.CENTER_HORIZONTAL);
-        topToolsPanel.setBackground(shape(0xE610151D, 18));
-        if (Build.VERSION.SDK_INT >= 21) topToolsPanel.setElevation(dp(10));
+        topToolsPanel.setBackground(box(C_GLASS, 18, C_LINE));
+        topToolsPanel.setElevation(dp(10));
         topToolsPanel.setClipToPadding(false);
         topToolsPanel.addView(topTools, new LinearLayout.LayoutParams(-1, dp(50)));
 
         topToolsToggle = new TextView(this);
         topToolsToggle.setText("⌃");
         topToolsToggle.setTextSize(14);
-        topToolsToggle.setTextColor(0xFFE9EDF5);
+        topToolsToggle.setTextColor(C_MUTE);
         topToolsToggle.setGravity(Gravity.CENTER);
-        topToolsToggle.setBackground(shape(0xE610151D, 10));
+        topToolsToggle.setBackground(box(C_GLASS, 10, C_LINE));
         topToolsToggle.setContentDescription("Sembunyikan menu atas");
         LinearLayout.LayoutParams handleLp = new LinearLayout.LayoutParams(dp(70), dp(20));
         handleLp.gravity = Gravity.CENTER_HORIZONTAL;
@@ -423,29 +510,31 @@ public class MainActivity extends AppCompatActivity {
         FrameLayout.LayoutParams ll = new FrameLayout.LayoutParams(dp(64), -1, Gravity.START); ll.setMargins(dp(8), dp(8), 0, dp(8)); root.addView(left, ll);
         FrameLayout.LayoutParams rr = new FrameLayout.LayoutParams(dp(88), -1, Gravity.END); rr.setMargins(0, dp(8), dp(8), dp(8)); root.addView(right, rr);
         root.addView(cd, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
-        setContentView(root); refreshMenus();
+        setContentView(root); refreshMenus(); refreshStrip();
 
-		shutterSound = new MediaActionSound();
-		shutterSound.load(MediaActionSound.SHUTTER_CLICK);
+        shutterSound = new MediaActionSound();
+        shutterSound.load(MediaActionSound.SHUTTER_CLICK);
         if (checkSelfPermission(Manifest.permission.CAMERA) == 0) startCam(); else askCam.launch(Manifest.permission.CAMERA);
     }
     void chooseQuality() {
         String[] opts = {"SD", "HD", "HQ", "4K"};
-        new AlertDialog.Builder(this).setTitle("Quality").setSingleChoiceItems(opts, quality, (d, which) -> {
-            quality = which; qualityTool.setText("QUALITY  ·  " + opts[which]); d.dismiss(); toast("Quality " + opts[which] + " · " + outputSizeLabel());
+        String[] desc = {"SD   ·   640 px   —   hemat ruang", "HD   ·   1280 px   —   seimbang", "HQ   ·   1920 px   —   tajam", "4K   ·   3840 px   —   maksimal"};
+        new AlertDialog.Builder(this).setTitle("Quality").setSingleChoiceItems(desc, quality, (d, which) -> {
+            quality = which; setTool(qualityTool, "QUALITY", opts[which]); d.dismiss(); toast("Quality " + opts[which] + " · " + outputSizeLabel());
         }).setNegativeButton("Batal", null).show();
     }
     void chooseAspect() {
         String[] opts = {"16:9", "4:3", "1:1", "9:16"};
-        new AlertDialog.Builder(this).setTitle("Aspect Ratio").setSingleChoiceItems(opts, aspectMode, (d, which) -> {
-            aspectMode = which; aspectTool.setText("ASPECT  ·  " + opts[which]); d.dismiss(); vf.invalidate(); toast("Aspect ratio " + opts[which]);
+        String[] desc = {"16:9   ·   Lebar / YouTube", "4:3   ·   Klasik", "1:1   ·   Persegi / Instagram", "9:16   ·   Vertikal / Reels & TikTok"};
+        new AlertDialog.Builder(this).setTitle("Aspect Ratio").setSingleChoiceItems(desc, aspectMode, (d, which) -> {
+            aspectMode = which; setTool(aspectTool, "ASPECT", opts[which]); d.dismiss(); vf.invalidate(); toast("Aspect ratio " + opts[which]);
         }).setNegativeButton("Batal", null).show();
     }
     void chooseFilter() {
         String[] opts = {"Original", "B&W", "Sepia", "Vintage", "Cool", "Warm", "Skin Smooth", "Brighten", "Soft Glow"};
         new AlertDialog.Builder(this).setTitle("Filter & Beauty").setSingleChoiceItems(opts, filterMode, (d, which) -> {
             filterMode = which;
-            filterTool.setText("FILTER  ·  " + opts[which].toUpperCase(Locale.ROOT));
+            setTool(filterTool, "FILTER", opts[which].toUpperCase(Locale.ROOT));
             d.dismiss();
             if (which >= 6) beautyIntensityDialog(opts[which]);
             else { vf.invalidate(); toast("Filter " + opts[which]); }
@@ -460,6 +549,7 @@ public class MainActivity extends AppCompatActivity {
         value.setTextColor(0xFFF2F4F8);
         SeekBar seek = new SeekBar(this);
         seek.setMax(100); seek.setProgress(beautyStrength);
+        seek.setProgressTintList(ColorStateList.valueOf(C_ACC)); seek.setThumbTintList(ColorStateList.valueOf(C_ACC2));
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) { beautyStrength = progress; value.setText("Intensitas: " + progress + "%"); vf.invalidate(); }
             public void onStartTrackingTouch(SeekBar bar) {}
@@ -474,7 +564,7 @@ public class MainActivity extends AppCompatActivity {
         PopupMenu menu = new PopupMenu(this, anchor);
         menu.getMenu().add("Muat gambar foreground").setOnMenuItemClickListener(item -> { pickForeground.launch("image/*"); return true; });
         menu.getMenu().add(foregroundVisible ? "Sembunyikan foreground" : "Tampilkan foreground").setOnMenuItemClickListener(item -> {
-            foregroundVisible = !foregroundVisible; foregroundTool.setText(foregroundVisible ? "FOREGROUND  ·  ON" : "FOREGROUND  ·  OFF"); vf.invalidate(); toast(foregroundVisible ? "Foreground aktif" : "Foreground disembunyikan"); return true;
+            foregroundVisible = !foregroundVisible; setFg(); vf.invalidate(); toast(foregroundVisible ? "Foreground aktif" : "Foreground disembunyikan"); return true;
         });
         menu.getMenu().add("Atur transparansi").setOnMenuItemClickListener(item -> { openTab(0); return true; });
         menu.show();
@@ -498,7 +588,6 @@ public class MainActivity extends AppCompatActivity {
             if (raw == null) throw new IOException("File tidak bisa dibuat");
             Properties props = new Properties();
             props.setProperty("projectName", projectName);
-            props.setProperty("titleText", titleText); props.setProperty("creditText", creditText);
             props.setProperty("quality", String.valueOf(quality)); props.setProperty("filterMode", String.valueOf(filterMode));
             props.setProperty("beautyStrength", String.valueOf(beautyStrength));
             props.setProperty("aspectMode", String.valueOf(aspectMode)); props.setProperty("fps", String.valueOf(fps));
@@ -517,17 +606,13 @@ public class MainActivity extends AppCompatActivity {
                 zip.putNextEntry(new ZipEntry("foreground.png"));
                 foregroundBmp.compress(Bitmap.CompressFormat.PNG, 100, zip); zip.closeEntry();
             }
-            if (editorImageBmp != null) {
-                zip.putNextEntry(new ZipEntry("editor_image.png"));
-                editorImageBmp.compress(Bitmap.CompressFormat.PNG, 100, zip); zip.closeEntry();
-            }
             zip.finish(); toast("Project berhasil disimpan: " + projectName);
         } catch (Exception e) { toast("Gagal menyimpan project: " + e.getMessage()); }
     }
     void openProjectFromUri(Uri uri) {
         try (InputStream raw = getContentResolver().openInputStream(uri); ZipInputStream zip = new ZipInputStream(raw)) {
             if (raw == null) throw new IOException("File tidak bisa dibaca");
-            Properties props = new Properties(); List<byte[]> loaded = new ArrayList<>(); Bitmap loadedForeground = null, loadedEditorImage = null;
+            Properties props = new Properties(); List<byte[]> loaded = new ArrayList<>(); Bitmap loadedForeground = null;
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 ByteArrayOutputStream out = new ByteArrayOutputStream(); byte[] buf = new byte[8192]; int n;
@@ -536,7 +621,6 @@ public class MainActivity extends AppCompatActivity {
                 if (name.equals("project.properties")) props.load(new ByteArrayInputStream(data));
                 else if (name.startsWith("frames/") && (name.endsWith(".jpg") || name.endsWith(".png"))) loaded.add(data);
                 else if (name.equals("foreground.png")) loadedForeground = BitmapFactory.decodeByteArray(data, 0, data.length);
-                else if (name.equals("editor_image.png")) loadedEditorImage = BitmapFactory.decodeByteArray(data, 0, data.length);
                 zip.closeEntry();
             }
             if (loaded.isEmpty()) throw new IOException("Project tidak berisi frame");
@@ -544,7 +628,6 @@ public class MainActivity extends AppCompatActivity {
             stopPlay(); stopAutoCapture(); counting = false; h.removeCallbacksAndMessages(null);
             frames.clear(); thumbs.clear(); frames.addAll(loaded); sel = -1; review = false; playBmp = null; onionBmp = null;
             projectName = props.getProperty("projectName", "Imported Project");
-            titleText = props.getProperty("titleText", ""); creditText = props.getProperty("creditText", "");
             quality = readInt(props, "quality", 1, 0, 3); filterMode = readInt(props, "filterMode", 0, 0, 8);
             beautyStrength = readInt(props, "beautyStrength", 45, 0, 100);
             aspectMode = readInt(props, "aspectMode", 0, 0, 3); fps = readInt(props, "fps", 8, 1, 60);
@@ -555,16 +638,16 @@ public class MainActivity extends AppCompatActivity {
             foregroundVisible = Boolean.parseBoolean(props.getProperty("foregroundVisible", "false"));
             onion = Boolean.parseBoolean(props.getProperty("onion", "true")); loop = Boolean.parseBoolean(props.getProperty("loop", "true"));
             try { bgColor = Integer.parseInt(props.getProperty("bgColor", String.valueOf(0xFF2B2F6B))); } catch (Exception ignored) { bgColor = 0xFF2B2F6B; }
-            foregroundBmp = loadedForeground; editorImageBmp = loadedEditorImage; bgPx = null;
+            foregroundBmp = loadedForeground; bgPx = null;
             for (byte[] data : frames) {
                 Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length);
                 if (b != null) thumbs.put(data, Bitmap.createScaledBitmap(b, 160, 90, true));
                 if (b != null) b.recycle();
             }
-            qualityTool.setText("QUALITY  ·  " + new String[]{"SD", "HD", "HQ", "4K"}[quality]);
-            aspectTool.setText("ASPECT  ·  " + new String[]{"16:9", "4:3", "1:1", "9:16"}[aspectMode]);
-            filterTool.setText("FILTER  ·  " + new String[]{"ORIGINAL", "B&W", "SEPIA", "VINTAGE", "COOL", "WARM", "SKIN SMOOTH", "BRIGHTEN", "SOFT GLOW"}[filterMode]);
-            foregroundTool.setText(foregroundVisible ? "FOREGROUND  ·  ON" : "FOREGROUND  ·  OFF");
+            setTool(qualityTool, "QUALITY", new String[]{"SD", "HD", "HQ", "4K"}[quality]);
+            setTool(aspectTool, "ASPECT", new String[]{"16:9", "4:3", "1:1", "9:16"}[aspectMode]);
+            setTool(filterTool, "FILTER", new String[]{"ORIGINAL", "B&W", "SEPIA", "VINTAGE", "COOL", "WARM", "SKIN SMOOTH", "BRIGHTEN", "SOFT GLOW"}[filterMode]);
+            setFg();
             after(); toast("Project berhasil dibuka: " + projectName);
         } catch (Exception e) { toast("Gagal membuka project: " + e.getMessage()); }
     }
@@ -575,8 +658,9 @@ public class MainActivity extends AppCompatActivity {
 
     void newProjectDialog() {
         EditText name = new EditText(this); name.setSingleLine(true); name.setText(projectName.equals("Untitled Project") ? "" : "");
-        name.setHint("Nama project baru"); name.setPadding(dp(14), dp(10), dp(14), dp(10));
-        LinearLayout wrap = new LinearLayout(this); wrap.setPadding(dp(20), dp(8), dp(20), dp(4)); wrap.addView(name);
+        name.setHint("Nama project baru"); name.setTextSize(15); name.setTextColor(C_TXT); name.setHintTextColor(C_MUTE);
+        name.setBackground(box(C_SURF, 12, C_LINE)); name.setPadding(dp(14), dp(12), dp(14), dp(12));
+        LinearLayout wrap = new LinearLayout(this); wrap.setPadding(dp(20), dp(8), dp(20), dp(4)); wrap.addView(name, new LinearLayout.LayoutParams(-1, -2));
         new AlertDialog.Builder(this).setTitle("Buat Project Baru").setMessage("Project baru akan dimulai dengan timeline kosong.")
             .setView(wrap).setNegativeButton("Batal", null).setPositiveButton("Buat", (dialog, which) -> {
                 String entered = name.getText().toString().trim();
@@ -586,8 +670,8 @@ public class MainActivity extends AppCompatActivity {
                     frames.clear(); thumbs.clear(); sel = -1; review = false; playing = false; onionBmp = null; playBmp = null;
                     projectName = entered; if (projectTitle != null) projectTitle.setText(projectName);
                     quality = 1; filterMode = 0; aspectMode = 0; foregroundVisible = false; foregroundAlpha = 65; foregroundBmp = null;
-                    qualityTool.setText("QUALITY  ·  HD"); aspectTool.setText("ASPECT  ·  16:9");
-                    foregroundTool.setText("FOREGROUND  ·  OFF"); filterTool.setText("FILTER  ·  ORIGINAL");
+                    setTool(qualityTool, "QUALITY", "HD"); setTool(aspectTool, "ASPECT", "16:9");
+                    setFg(); setTool(filterTool, "FILTER", "ORIGINAL");
                     refreshStrip(); vf.invalidate();
                     toast("Project baru dibuat: " + projectName);
                 };
@@ -598,9 +682,14 @@ public class MainActivity extends AppCompatActivity {
             }).show();
     }
 
-    android.graphics.drawable.Drawable shutterBg() {
-        android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
-        d.setShape(android.graphics.drawable.GradientDrawable.OVAL); d.setColor(0xFFFF3B30); d.setStroke(dp(5), 0xFFDDDDDD); return d;
+    Drawable shutterBg() {
+        GradientDrawable ring = new GradientDrawable();
+        ring.setShape(GradientDrawable.OVAL); ring.setColor(0x33000000); ring.setStroke(dp(3), 0xFFFFFFFF);
+        GradientDrawable core = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFFFF7A6E, 0xFFE5251B});
+        core.setShape(GradientDrawable.OVAL);
+        LayerDrawable ld = new LayerDrawable(new Drawable[]{ring, core});
+        ld.setLayerInset(1, dp(7), dp(7), dp(7), dp(7));
+        return ld;
     }
     @Override public void onWindowFocusChanged(boolean f) {
         super.onWindowFocusChanged(f);
@@ -670,17 +759,8 @@ void toggleFlash() {
 }
 
 void updateFlashButton() {
-    if (flashButton != null) {
-        flashButton.setText(flashOn ? "⚡ ON" : "⚡ OFF");
-
-        flashButton.setBackground(
-            shape(flashOn ? 0xFFFFB547 : 0xFF202630, 14)
-        );
-
-        flashButton.setTextColor(
-            flashOn ? 0xFF10151D : 0xFFF2F4F8
-        );
-    }
+    // Ikon ⚡ tetap; status ditunjukkan lewat warna tombol (menyala = aksen).
+    if (flashButton != null) rail(flashButton, flashOn ? 1 : 0);
 }
     void onFrame(ImageProxy ip) {
         try {
@@ -864,7 +944,7 @@ void updateFlashButton() {
         autoRemaining = delay;
         cd.setText(String.valueOf(autoRemaining));
         h.post(autoCaptureTick);
-        if (autoCaptureButton != null) { autoCaptureButton.setText("■ HENTIKAN FOTO OTOMATIS"); autoCaptureButton.setBackground(shape(0xFFE53935, 14)); }
+        if (autoCaptureButton != null) { autoCaptureButton.setText("■ HENTIKAN FOTO OTOMATIS"); style(autoCaptureButton, 3); }
         toast("Foto otomatis dimulai setiap " + delay + " detik. Tekan tombol lagi untuk berhenti.");
     }
 
@@ -873,7 +953,7 @@ void updateFlashButton() {
         h.removeCallbacks(autoCaptureTick);
         autoRemaining = 0;
         if (cd != null) cd.setText("");
-        if (autoCaptureButton != null) { autoCaptureButton.setText("▶ MULAI FOTO OTOMATIS"); autoCaptureButton.setBackground(shape(0xFF202630, 14)); }
+        if (autoCaptureButton != null) { autoCaptureButton.setText("▶ MULAI FOTO OTOMATIS"); style(autoCaptureButton, 1); }
     }
 
     void tick(int n) {
@@ -932,14 +1012,33 @@ void updateFlashButton() {
     }
     void refreshStrip() {
         strip.removeAllViews();
-        for (int i = 0; i < frames.size(); i++) {
-            final int k = i; ImageView v = new ImageView(this);
-            v.setImageBitmap(thumbs.get(frames.get(i))); v.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            v.setPadding(dp(2), dp(2), dp(2), dp(2)); v.setBackground(shape(i == sel ? 0xFFFFB020 : 0xFF333333, 6));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(76), dp(44)); lp.setMargins(dp(3), dp(3), dp(3), dp(3));
-            v.setLayoutParams(lp); v.setOnClickListener(x -> select(k == sel ? -1 : k)); strip.addView(v);
+        if (frames.isEmpty()) {
+            TextView hint = new TextView(this);
+            hint.setText("Belum ada frame  ·  tekan tombol ● untuk mengambil foto pertama");
+            hint.setTextSize(11); hint.setTextColor(C_MUTE); hint.setGravity(Gravity.CENTER_VERTICAL); hint.setPadding(dp(12), 0, dp(12), 0);
+            strip.addView(hint, new LinearLayout.LayoutParams(-2, dp(50)));
         }
-        cnt.setText(frames.size() + " FRAME" + (frames.size() == 1 ? "" : "S"));
+        for (int i = 0; i < frames.size(); i++) {
+            final int k = i; final boolean on = i == sel;
+            FrameLayout cell = new FrameLayout(this);
+            cell.setPadding(dp(2), dp(2), dp(2), dp(2));
+            cell.setBackground(box(0xFF11161E, 9, on ? C_ACC : C_LINE, on ? 2 : 1));
+            cell.setAlpha(sel < 0 || on ? 1f : 0.78f);
+            ImageView v = new ImageView(this);
+            v.setImageBitmap(thumbs.get(frames.get(i))); v.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            v.setOutlineProvider(new ViewOutlineProvider() {
+                @Override public void getOutline(View vw, Outline o) { o.setRoundRect(0, 0, vw.getWidth(), vw.getHeight(), dp(7)); }
+            });
+            v.setClipToOutline(true);
+            cell.addView(v, new FrameLayout.LayoutParams(-1, -1));
+            TextView num = new TextView(this); num.setText(String.valueOf(i + 1)); num.setTextSize(8); num.setTextColor(0xFFFFFFFF);
+            num.setTypeface(Typeface.DEFAULT, Typeface.BOLD); num.setPadding(dp(4), dp(1), dp(4), dp(1)); num.setBackground(box(0xAA000000, 6, 0));
+            FrameLayout.LayoutParams nl = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.START); nl.setMargins(dp(3), 0, 0, dp(3));
+            cell.addView(num, nl);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(80), dp(50)); lp.setMargins(dp(3), dp(3), dp(3), dp(3));
+            cell.setLayoutParams(lp); cell.setOnClickListener(x -> select(k == sel ? -1 : k)); strip.addView(cell);
+        }
+        cnt.setText(countText(frames.size()));
         final View c = strip.getChildAt(sel);
         if (c != null) hs.post(() -> hs.smoothScrollTo(c.getLeft() - dp(100), 0));
     }
@@ -1002,12 +1101,12 @@ void updateFlashButton() {
     void updatePlayPauseButton() {
         if (playPauseButton != null) {
             String icon = playing ? "Ⅱ" : "▶";
-            playPauseButton.setText(icon);
             playPauseButton.setContentDescription(playing ? "Jeda" : "Play");
-            // Merah saat pemutaran aktif, kembali ke warna normal saat jeda/berhenti.
-            playPauseButton.setBackground(shape(playing ? 0xFFE53935 : 0xFF202630, 14));
             int index = mi.indexOf(playPauseButton);
             if (index >= 0) mlabel.get(index)[0] = icon;
+            playPauseButton.setText(labels && index >= 0 ? icon + "  " + mlabel.get(index)[1] : icon);
+            // Merah saat pemutaran aktif, kembali ke gaya normal saat jeda/berhenti.
+            rail(playPauseButton, playing ? 2 : 0);
         }
     }
 
@@ -1041,7 +1140,7 @@ void updateFlashButton() {
                 MediaMuxer mx = new MediaMuxer(pfd.getFileDescriptor(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
                 MediaCodec.BufferInfo bi = new MediaCodec.BufferInfo(); int[] tr = {-1};
                 for (int k = 0; k <= fr.size(); k++) {
-                    byte[] d = fr.get(Math.min(k, fr.size() - 1)); Bitmap bm = composeExportFrame(d, outSize[0], outSize[1]);
+                    byte[] d = fr.get(Math.min(k, fr.size() - 1)); Bitmap bm = BitmapFactory.decodeByteArray(d, 0, d.length);
                     Canvas c = sf.lockCanvas(null); c.drawBitmap(bm, null, new Rect(0, 0, outSize[0], outSize[1]), null); sf.unlockCanvasAndPost(c); bm.recycle();
                     drain(enc, mx, bi, tr, false); Thread.sleep(1000 / f);
                 }

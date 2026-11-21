@@ -1,5 +1,15 @@
 # Stop Motion Pro 5.0 – Premium Landscape
 
+## Pembaruan tampilan menu (UI Redesign)
+- Sistem desain terpusat (token warna `C_*`): tema gelap kaca (glassmorphism) dengan aksen amber.
+- Rail kiri/kanan dibungkus ScrollView sehingga aman di layar landscape pendek; tab aktif ditandai gradien amber, tombol Play berubah merah saat memutar, Flash menyala amber saat aktif.
+- Toolbar atas: label redup + nilai berwarna + panah dropdown; status ON hijau, OFF abu-abu.
+- Panel pengaturan: judul seksi dengan garis aksen, slider dengan nilai langsung (mis. `+20`, `120%`), tombol sejajar sama lebar, catatan bergaya kartu.
+- Strip frame: thumbnail membulat dengan nomor frame, bingkai amber untuk frame terpilih, dan petunjuk saat timeline kosong. Penghitung frame menampilkan `n/200`.
+- Tombol shutter berbentuk cincin + inti merah gradien; efek riak & animasi tekan pada semua tombol.
+- Dialog (Quality, Aspect, Filter, Project) memakai tema gelap membulat (`res/values/styles.xml`) dan opsi Quality/Aspect kini disertai keterangan.
+- Logika kamera, ekspor, dan penyimpanan project tidak diubah.
+
 Pembaruan 5.0: Quality, Aspect Ratio, Foreground, dan Filter dipindahkan ke toolbar khusus di bagian atas layar. Ditambahkan tombol **New Project** untuk membuat project baru dengan nama sendiri. Project baru mengosongkan timeline setelah konfirmasi bila masih ada frame, lalu mengembalikan pengaturan kualitas/filter/rasio/foreground ke nilai awal.
 
 Fitur tetap: kamera landscape, pengambilan dan pengelolaan frame, onion-skin, chroma key, timer, foreground PNG/JPG dengan transparansi, filter Original/B&W/Sepia/Vintage/Cool/Warm, aspect ratio 16:9/4:3/1:1/9:16, quality SD/HD/HQ/4K, dan ekspor MP4.
