@@ -54,6 +54,8 @@ public class MainActivity extends AppCompatActivity {
 	TextView flashButton;
     int autoRemaining = 0;
     Bitmap foregroundBmp;
+    Bitmap editorImageBmp;
+    String titleText = "", creditText = "";
     VF vf; TextView cnt, cd, projectTitle, qualityTool, aspectTool, foregroundTool, filterTool, playPauseButton, topToolsToggle; View left, right; LinearLayout strip, topToolsPanel; HorizontalScrollView hs, topTools; ScrollView drawer; boolean topToolsVisible = true;
     View[] pnl; TextView[] tabs; TextView autoCaptureButton; int cur = -1, con = 100, sat = 100, sel = -1; boolean review, loop = true; Bitmap thumb;
     final Map<byte[], Bitmap> thumbs = new IdentityHashMap<>();
@@ -202,6 +204,46 @@ public class MainActivity extends AppCompatActivity {
             int[] a = new int[W * H]; o.getPixels(a, 0, W, 0, 0, W, H); bgPx = a;
         } catch (Exception e) { toast("Gambar tidak bisa dibuka"); }
     });
+    ActivityResultLauncher<String> pickEditorImage = registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
+        if (uri == null) return;
+        try (InputStream in = getContentResolver().openInputStream(uri)) {
+            Bitmap src = BitmapFactory.decodeStream(in);
+            if (src == null) throw new IOException("Format gambar tidak didukung");
+            editorImageBmp = src.copy(Bitmap.Config.ARGB_8888, false); vf.invalidate(); toast("Gambar video dimuat");
+        } catch (Exception e) { toast("Gambar tidak bisa dibuka"); }
+    });
+    void editOverlayText(boolean title) {
+        EditText input = new EditText(this); input.setText(title ? titleText : creditText); input.setHint(title ? "Teks judul" : "Nama / credit");
+        new AlertDialog.Builder(this).setTitle(title ? "Judul video" : "Credit video").setView(input)
+            .setNegativeButton("Batal", null).setPositiveButton("Simpan", (d, w) -> {
+                if (title) titleText = input.getText().toString().trim(); else creditText = input.getText().toString().trim();
+                toast(title ? "Judul disimpan" : "Credit disimpan"); vf.invalidate();
+            }).show();
+    }
+    Bitmap composeExportFrame(byte[] data, int outW, int outH) {
+        Bitmap bm = BitmapFactory.decodeByteArray(data, 0, data.length);
+        if (bm == null) return Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
+        Bitmap out = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(out); Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        c.drawBitmap(bm, null, new Rect(0, 0, outW, outH), p); bm.recycle();
+        if (editorImageBmp != null) {
+            float maxW = outW * .28f, maxH = outH * .28f;
+            float scale = Math.min(maxW / editorImageBmp.getWidth(), maxH / editorImageBmp.getHeight());
+            int iw = Math.max(1, Math.round(editorImageBmp.getWidth() * scale)), ih = Math.max(1, Math.round(editorImageBmp.getHeight() * scale));
+            c.drawBitmap(editorImageBmp, null, new Rect(outW - iw - outW / 30, outH - ih - outH / 30, outW - outW / 30, outH - outH / 30), p);
+        }
+        drawExportText(c, titleText, outW, outH, true);
+        drawExportText(c, creditText, outW, outH, false);
+        return out;
+    }
+    void drawExportText(Canvas c, String text, int w, int h, boolean title) {
+        if (text == null || text.trim().isEmpty()) return;
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG); p.setColor(Color.WHITE); p.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        p.setTextAlign(Paint.Align.CENTER); p.setTextSize(Math.max(24, w * (title ? .055f : .032f)));
+        p.setShadowLayer(5, 2, 2, Color.BLACK);
+        float y = title ? h * .13f : h * .92f; c.drawText(text, w / 2f, y, p);
+    }
+
     ActivityResultLauncher<String> askCam = registerForActivityResult(new ActivityResultContracts.RequestPermission(), ok -> {
         if (ok) startCam(); else toast("Izin kamera diperlukan");
     });
@@ -243,6 +285,11 @@ public class MainActivity extends AppCompatActivity {
                 row(cycle("FPS: ", new String[]{"8", "4", "12", "24"}, v -> fps = new int[]{8, 4, 12, 24}[v]), cycle("Ulang: ", new String[]{"Ya", "Tidak"}, v -> loop = v == 0)),
                 chip("Duplikat", v -> dupSel()),
                 tip("Pilih thumbnail untuk meninjau frame. Tekan thumbnail sekali lagi untuk kembali ke kamera.")),
+            panel(heading("EDITOR VIDEO", 13, 0xFFFFB547),
+                row(chip("＋ Gambar video", v -> pickEditorImage.launch("image/*")), chip("Hapus gambar", v -> { editorImageBmp = null; vf.invalidate(); toast("Gambar video dihapus"); })),
+                chip("Teks judul", v -> editOverlayText(true)),
+                chip("Teks credit", v -> editOverlayText(false)),
+                tip("Gambar, judul, dan credit ditumpangkan pada hasil ekspor. Gambar latar chroma key tetap terpisah.")),
             panel(heading("EXPORT VIDEO", 13, 0xFFFFB547),
                 chip("⬇ EXPORT VIDEO MP4", v -> export()),
                 tip("Video MP4 akan disimpan ke galeri pada folder Movies/StopMotion."),
@@ -451,6 +498,7 @@ public class MainActivity extends AppCompatActivity {
             if (raw == null) throw new IOException("File tidak bisa dibuat");
             Properties props = new Properties();
             props.setProperty("projectName", projectName);
+            props.setProperty("titleText", titleText); props.setProperty("creditText", creditText);
             props.setProperty("quality", String.valueOf(quality)); props.setProperty("filterMode", String.valueOf(filterMode));
             props.setProperty("beautyStrength", String.valueOf(beautyStrength));
             props.setProperty("aspectMode", String.valueOf(aspectMode)); props.setProperty("fps", String.valueOf(fps));
@@ -469,13 +517,17 @@ public class MainActivity extends AppCompatActivity {
                 zip.putNextEntry(new ZipEntry("foreground.png"));
                 foregroundBmp.compress(Bitmap.CompressFormat.PNG, 100, zip); zip.closeEntry();
             }
+            if (editorImageBmp != null) {
+                zip.putNextEntry(new ZipEntry("editor_image.png"));
+                editorImageBmp.compress(Bitmap.CompressFormat.PNG, 100, zip); zip.closeEntry();
+            }
             zip.finish(); toast("Project berhasil disimpan: " + projectName);
         } catch (Exception e) { toast("Gagal menyimpan project: " + e.getMessage()); }
     }
     void openProjectFromUri(Uri uri) {
         try (InputStream raw = getContentResolver().openInputStream(uri); ZipInputStream zip = new ZipInputStream(raw)) {
             if (raw == null) throw new IOException("File tidak bisa dibaca");
-            Properties props = new Properties(); List<byte[]> loaded = new ArrayList<>(); Bitmap loadedForeground = null;
+            Properties props = new Properties(); List<byte[]> loaded = new ArrayList<>(); Bitmap loadedForeground = null, loadedEditorImage = null;
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 ByteArrayOutputStream out = new ByteArrayOutputStream(); byte[] buf = new byte[8192]; int n;
@@ -484,6 +536,7 @@ public class MainActivity extends AppCompatActivity {
                 if (name.equals("project.properties")) props.load(new ByteArrayInputStream(data));
                 else if (name.startsWith("frames/") && (name.endsWith(".jpg") || name.endsWith(".png"))) loaded.add(data);
                 else if (name.equals("foreground.png")) loadedForeground = BitmapFactory.decodeByteArray(data, 0, data.length);
+                else if (name.equals("editor_image.png")) loadedEditorImage = BitmapFactory.decodeByteArray(data, 0, data.length);
                 zip.closeEntry();
             }
             if (loaded.isEmpty()) throw new IOException("Project tidak berisi frame");
@@ -491,6 +544,7 @@ public class MainActivity extends AppCompatActivity {
             stopPlay(); stopAutoCapture(); counting = false; h.removeCallbacksAndMessages(null);
             frames.clear(); thumbs.clear(); frames.addAll(loaded); sel = -1; review = false; playBmp = null; onionBmp = null;
             projectName = props.getProperty("projectName", "Imported Project");
+            titleText = props.getProperty("titleText", ""); creditText = props.getProperty("creditText", "");
             quality = readInt(props, "quality", 1, 0, 3); filterMode = readInt(props, "filterMode", 0, 0, 8);
             beautyStrength = readInt(props, "beautyStrength", 45, 0, 100);
             aspectMode = readInt(props, "aspectMode", 0, 0, 3); fps = readInt(props, "fps", 8, 1, 60);
@@ -501,7 +555,7 @@ public class MainActivity extends AppCompatActivity {
             foregroundVisible = Boolean.parseBoolean(props.getProperty("foregroundVisible", "false"));
             onion = Boolean.parseBoolean(props.getProperty("onion", "true")); loop = Boolean.parseBoolean(props.getProperty("loop", "true"));
             try { bgColor = Integer.parseInt(props.getProperty("bgColor", String.valueOf(0xFF2B2F6B))); } catch (Exception ignored) { bgColor = 0xFF2B2F6B; }
-            foregroundBmp = loadedForeground; bgPx = null;
+            foregroundBmp = loadedForeground; editorImageBmp = loadedEditorImage; bgPx = null;
             for (byte[] data : frames) {
                 Bitmap b = BitmapFactory.decodeByteArray(data, 0, data.length);
                 if (b != null) thumbs.put(data, Bitmap.createScaledBitmap(b, 160, 90, true));
@@ -987,7 +1041,7 @@ void updateFlashButton() {
                 MediaMuxer mx = new MediaMuxer(pfd.getFileDescriptor(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
                 MediaCodec.BufferInfo bi = new MediaCodec.BufferInfo(); int[] tr = {-1};
                 for (int k = 0; k <= fr.size(); k++) {
-                    byte[] d = fr.get(Math.min(k, fr.size() - 1)); Bitmap bm = BitmapFactory.decodeByteArray(d, 0, d.length);
+                    byte[] d = fr.get(Math.min(k, fr.size() - 1)); Bitmap bm = composeExportFrame(d, outSize[0], outSize[1]);
                     Canvas c = sf.lockCanvas(null); c.drawBitmap(bm, null, new Rect(0, 0, outSize[0], outSize[1]), null); sf.unlockCanvasAndPost(c); bm.recycle();
                     drain(enc, mx, bi, tr, false); Thread.sleep(1000 / f);
                 }
