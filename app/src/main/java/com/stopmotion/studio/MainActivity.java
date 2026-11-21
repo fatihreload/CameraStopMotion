@@ -298,25 +298,39 @@ public class MainActivity extends AppCompatActivity {
         aspectTool = chip("ASPECT · 16:9", v -> chooseAspect());
         foregroundTool = chip("FOREGROUND · OFF", v -> foregroundMenu(v));
         filterTool = chip("FILTER · ORIGINAL", v -> chooseFilter());
-        TextView openProject = chip("📂 OPEN PROJECT", v -> openProjectDialog());
+        TextView openProject = chip("📂 OPEN PROJECT", v -> openProjectDialog());\n        openProject.setPadding(dp(9), dp(8), dp(9), dp(8));
         TextView newProject = chip("＋ NEW PROJECT", v -> newProjectDialog());
         for (TextView item : new TextView[]{qualityTool, aspectTool, foregroundTool, filterTool, openProject, newProject}) {
             toolRow.addView(item, new LinearLayout.LayoutParams(-2, -2));
         }
         topTools = new HorizontalScrollView(this); topTools.setHorizontalScrollBarEnabled(false); topTools.setFillViewport(false); topTools.addView(toolRow);
-        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-1, dp(50), Gravity.TOP); tp.setMargins(dp(82), dp(8), dp(160), 0); root.addView(topTools, tp);
-        topToolsToggle = chip("⌃", v -> {
+        // Beri toolbar ruang sampai sebelum panel kontrol kanan agar label Open Project tidak terpotong.
+        FrameLayout.LayoutParams tp = new FrameLayout.LayoutParams(-1, dp(50), Gravity.TOP);
+        tp.setMargins(dp(82), dp(8), dp(104), 0);
+        root.addView(topTools, tp);
+
+        // Handle kecil menyatu di bawah toolbar, seperti pegangan untuk menarik panel.
+        topToolsToggle = new TextView(this);
+        topToolsToggle.setText("⌃");
+        topToolsToggle.setTextSize(15);
+        topToolsToggle.setTextColor(0xFFE9EDF5);
+        topToolsToggle.setGravity(Gravity.CENTER);
+        topToolsToggle.setPadding(0, 0, 0, 0);
+        topToolsToggle.setMinHeight(0);
+        topToolsToggle.setBackground(shape(0xE610151D, 12));
+        topToolsToggle.setContentDescription("Sembunyikan menu atas");
+        topToolsToggle.setOnClickListener(v -> {
             topToolsVisible = !topToolsVisible;
             topTools.setVisibility(topToolsVisible ? View.VISIBLE : View.GONE);
             topToolsToggle.setText(topToolsVisible ? "⌃" : "⌄");
             topToolsToggle.setContentDescription(topToolsVisible ? "Sembunyikan menu atas" : "Tampilkan menu atas");
         });
-        topToolsToggle.setTextSize(18);
-        topToolsToggle.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams toggleLp = new FrameLayout.LayoutParams(dp(44), dp(36), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        toggleLp.topMargin = dp(60);
+        FrameLayout.LayoutParams toggleLp = new FrameLayout.LayoutParams(dp(64), dp(20), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        toggleLp.topMargin = dp(55);
         root.addView(topToolsToggle, toggleLp);
-        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); cp.topMargin = dp(100); root.addView(cnt, cp);
+        FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        cp.topMargin = dp(82);
+        root.addView(cnt, cp);
 
         FrameLayout.LayoutParams dl = new FrameLayout.LayoutParams(dp(300), -1, Gravity.START); dl.setMargins(dp(78), dp(116), 0, dp(82)); root.addView(drawer, dl);
         FrameLayout.LayoutParams hl = new FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM); hl.setMargins(dp(78), 0, dp(112), dp(8)); root.addView(hs, hl);
