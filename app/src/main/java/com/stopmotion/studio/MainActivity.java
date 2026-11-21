@@ -45,7 +45,7 @@ public class MainActivity extends AppCompatActivity {
     Bitmap onionBmp, playBmp;
     int keyMode, sens = 50, soft = 30, delay, fps = 8, bright, bgColor = 0xFF2B2F6B, pi;
     // Output quality: SD/HD/HQ/4K. These are rendered/export dimensions.
-    int quality = 1, filterMode = 0, aspectMode = 0, foregroundAlpha = 65;
+    int quality = 1, filterMode = 0, aspectMode = 0, foregroundAlpha = 65, beautyStrength = 45;
     String projectName = "Untitled Project";
     boolean onion = true, playing, paused, front, counting, foregroundVisible = false, autoCapturing = false;
 	boolean flashOn = false;
@@ -256,8 +256,34 @@ public class MainActivity extends AppCompatActivity {
         String[] tn = {"Layar", "Timer", "Edit", "Export"}, ti = {"◈", "◷", "✎", "⬇"}; tabs = new TextView[4];
         LinearLayout lc = new LinearLayout(this); lc.setOrientation(LinearLayout.VERTICAL); lc.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         lc.setPadding(dp(5), dp(12), dp(5), dp(8)); lc.setBackground(shape(0xD910151D, 20));
-        TextView brandMark = heading("S", 19, 0xFF10151D); brandMark.setGravity(Gravity.CENTER); brandMark.setBackground(shape(0xFFFFB547, 12));
-        LinearLayout.LayoutParams bm = new LinearLayout.LayoutParams(dp(42), dp(42)); bm.bottomMargin = dp(16); lc.addView(brandMark, bm);
+        // Tombol pintas project menggantikan logo S, dengan gradien, garis halus, dan efek tekan.
+        TextView newProjectShortcut = new TextView(this);
+        newProjectShortcut.setText("＋\nNEW\nPROJECT");
+        newProjectShortcut.setTextSize(9);
+        newProjectShortcut.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        newProjectShortcut.setTextColor(0xFF171B23);
+        newProjectShortcut.setGravity(Gravity.CENTER);
+        newProjectShortcut.setLineSpacing(0f, 0.9f);
+        android.graphics.drawable.GradientDrawable shortcutBg = new android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                new int[]{0xFFFFD27A, 0xFFFFA92F});
+        shortcutBg.setCornerRadius(dp(14));
+        shortcutBg.setStroke(dp(1), 0x99FFFFFF);
+        newProjectShortcut.setBackground(shortcutBg);
+        newProjectShortcut.setElevation(dp(5));
+        newProjectShortcut.setContentDescription("Buat project baru");
+        newProjectShortcut.setOnClickListener(v -> newProjectDialog());
+        newProjectShortcut.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                v.animate().scaleX(0.94f).scaleY(0.94f).setDuration(90).start();
+            } else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+                v.animate().scaleX(1f).scaleY(1f).setDuration(120).start();
+            }
+            return false;
+        });
+        LinearLayout.LayoutParams bm = new LinearLayout.LayoutParams(dp(52), dp(62));
+        bm.bottomMargin = dp(10);
+        lc.addView(newProjectShortcut, bm);
         lc.addView(mb("☰", "Nama menu", v -> { labels = !labels; refreshMenus(); }));
         for (int i = 0; i < tabs.length; i++) { final int k = i; tabs[i] = mb(ti[i], tn[i], v -> openTab(k)); lc.addView(tabs[i]); }
         left = lc;
@@ -370,10 +396,33 @@ public class MainActivity extends AppCompatActivity {
         }).setNegativeButton("Batal", null).show();
     }
     void chooseFilter() {
-        String[] opts = {"Original", "B&W", "Sepia", "Vintage", "Cool", "Warm"};
-        new AlertDialog.Builder(this).setTitle("Filter").setSingleChoiceItems(opts, filterMode, (d, which) -> {
-            filterMode = which; filterTool.setText("FILTER  ·  " + opts[which].toUpperCase(Locale.ROOT)); d.dismiss(); vf.invalidate(); toast("Filter " + opts[which]);
+        String[] opts = {"Original", "B&W", "Sepia", "Vintage", "Cool", "Warm", "Skin Smooth", "Brighten", "Soft Glow"};
+        new AlertDialog.Builder(this).setTitle("Filter & Beauty").setSingleChoiceItems(opts, filterMode, (d, which) -> {
+            filterMode = which;
+            filterTool.setText("FILTER  ·  " + opts[which].toUpperCase(Locale.ROOT));
+            d.dismiss();
+            if (which >= 6) beautyIntensityDialog(opts[which]);
+            else { vf.invalidate(); toast("Filter " + opts[which]); }
         }).setNegativeButton("Batal", null).show();
+    }
+    void beautyIntensityDialog(String title) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(12), dp(20), dp(4));
+        TextView value = new TextView(this);
+        value.setText("Intensitas: " + beautyStrength + "%");
+        value.setTextColor(0xFFF2F4F8);
+        SeekBar seek = new SeekBar(this);
+        seek.setMax(100); seek.setProgress(beautyStrength);
+        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) { beautyStrength = progress; value.setText("Intensitas: " + progress + "%"); vf.invalidate(); }
+            public void onStartTrackingTouch(SeekBar bar) {}
+            public void onStopTrackingTouch(SeekBar bar) {}
+        });
+        box.addView(value); box.addView(seek);
+        new AlertDialog.Builder(this).setTitle(title).setView(box)
+            .setPositiveButton("Selesai", (dlg, w) -> { vf.invalidate(); toast(title + " aktif"); })
+            .setNegativeButton("Batal", null).show();
     }
     void foregroundMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
@@ -404,6 +453,7 @@ public class MainActivity extends AppCompatActivity {
             Properties props = new Properties();
             props.setProperty("projectName", projectName);
             props.setProperty("quality", String.valueOf(quality)); props.setProperty("filterMode", String.valueOf(filterMode));
+            props.setProperty("beautyStrength", String.valueOf(beautyStrength));
             props.setProperty("aspectMode", String.valueOf(aspectMode)); props.setProperty("fps", String.valueOf(fps));
             props.setProperty("delay", String.valueOf(delay)); props.setProperty("keyMode", String.valueOf(keyMode));
             props.setProperty("sens", String.valueOf(sens)); props.setProperty("soft", String.valueOf(soft));
@@ -442,7 +492,8 @@ public class MainActivity extends AppCompatActivity {
             stopPlay(); stopAutoCapture(); counting = false; h.removeCallbacksAndMessages(null);
             frames.clear(); thumbs.clear(); frames.addAll(loaded); sel = -1; review = false; playBmp = null; onionBmp = null;
             projectName = props.getProperty("projectName", "Imported Project");
-            quality = readInt(props, "quality", 1, 0, 3); filterMode = readInt(props, "filterMode", 0, 0, 5);
+            quality = readInt(props, "quality", 1, 0, 3); filterMode = readInt(props, "filterMode", 0, 0, 8);
+            beautyStrength = readInt(props, "beautyStrength", 45, 0, 100);
             aspectMode = readInt(props, "aspectMode", 0, 0, 3); fps = readInt(props, "fps", 8, 1, 60);
             delay = readInt(props, "delay", 0, 0, 10); keyMode = readInt(props, "keyMode", 0, 0, 2);
             sens = readInt(props, "sens", 50, 0, 100); soft = readInt(props, "soft", 30, 0, 100);
@@ -459,7 +510,7 @@ public class MainActivity extends AppCompatActivity {
             }
             qualityTool.setText("QUALITY  ·  " + new String[]{"SD", "HD", "HQ", "4K"}[quality]);
             aspectTool.setText("ASPECT  ·  " + new String[]{"16:9", "4:3", "1:1", "9:16"}[aspectMode]);
-            filterTool.setText("FILTER  ·  " + new String[]{"ORIGINAL", "B&W", "SEPIA", "VINTAGE", "COOL", "WARM"}[filterMode]);
+            filterTool.setText("FILTER  ·  " + new String[]{"ORIGINAL", "B&W", "SEPIA", "VINTAGE", "COOL", "WARM", "SKIN SMOOTH", "BRIGHTEN", "SOFT GLOW"}[filterMode]);
             foregroundTool.setText(foregroundVisible ? "FOREGROUND  ·  ON" : "FOREGROUND  ·  OFF");
             after(); toast("Project berhasil dibuka: " + projectName);
         } catch (Exception e) { toast("Gagal membuka project: " + e.getMessage()); }
@@ -617,10 +668,28 @@ void updateFlashButton() {
     void applyFilter(int[] p) {
         int mode = filterMode;
         if (mode == 0) return;
+        int strength = beautyStrength;
+        int[] source = null;
+        if (mode == 6 || mode == 8) source = p.clone();
         for (int i = 0; i < p.length; i++) {
             int c = p[i], r = c >> 16 & 255, g = c >> 8 & 255, b = c & 255;
             int nr = r, ng = g, nb = b;
-            if (mode == 1) { int y = (int)(.299f*r + .587f*g + .114f*b); nr = ng = nb = y; }
+            if (mode == 6 || mode == 8) {
+                int x = i % W, y = i / W;
+                int sr = 0, sg = 0, sb = 0, count = 0;
+                for (int yy = Math.max(0, y - 1); yy <= Math.min(H - 1, y + 1); yy++) {
+                    for (int xx = Math.max(0, x - 1); xx <= Math.min(W - 1, x + 1); xx++) {
+                        int q = source[yy * W + xx]; sr += q >> 16 & 255; sg += q >> 8 & 255; sb += q & 255; count++;
+                    }
+                }
+                float mix = (strength / 100f) * (mode == 6 ? .72f : .42f);
+                nr = cl((int)(r * (1f - mix) + (sr / (float)count) * mix));
+                ng = cl((int)(g * (1f - mix) + (sg / (float)count) * mix));
+                nb = cl((int)(b * (1f - mix) + (sb / (float)count) * mix));
+                if (mode == 8) { nr = cl((int)(nr + strength * .18f)); ng = cl((int)(ng + strength * .16f)); nb = cl((int)(nb + strength * .12f)); }
+            }
+            else if (mode == 7) { float lift = strength * .55f; nr = cl((int)(r + lift)); ng = cl((int)(g + lift)); nb = cl((int)(b + lift)); }
+            else if (mode == 1) { int y = (int)(.299f*r + .587f*g + .114f*b); nr = ng = nb = y; }
             else if (mode == 2 || mode == 3) {
                 nr = cl((int)(.393f*r + .769f*g + .189f*b));
                 ng = cl((int)(.349f*r + .686f*g + .168f*b));
