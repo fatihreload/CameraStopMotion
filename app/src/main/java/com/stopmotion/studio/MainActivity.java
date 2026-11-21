@@ -110,7 +110,7 @@ public class MainActivity extends AppCompatActivity {
     }
     String outputSizeLabel() { int[] z = outputSize(); return z[0] + " × " + z[1]; }
     int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
-    void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_LONG).show(); }
+    void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_SHORT).show(); }
 
     android.graphics.drawable.GradientDrawable shape(int color, int r) {
         android.graphics.drawable.GradientDrawable d = new android.graphics.drawable.GradientDrawable();
@@ -305,8 +305,8 @@ public class MainActivity extends AppCompatActivity {
         });
         topToolsToggle.setTextSize(18);
         topToolsToggle.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams toggleLp = new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.TOP | Gravity.END);
-        toggleLp.setMargins(0, dp(8), dp(110), 0);
+        FrameLayout.LayoutParams toggleLp = new FrameLayout.LayoutParams(dp(44), dp(36), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        toggleLp.topMargin = dp(58);
         root.addView(topToolsToggle, toggleLp);
         FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.CENTER_HORIZONTAL); cp.topMargin = dp(66); root.addView(cnt, cp);
 
@@ -737,7 +737,7 @@ void updateFlashButton() {
         sel = frames.size() - 1;
         refreshStrip();
 
-        toast("Frame disimpan · " + outputSizeLabel());
+        toast("Frame disimpan");
     }
 
     @Override
