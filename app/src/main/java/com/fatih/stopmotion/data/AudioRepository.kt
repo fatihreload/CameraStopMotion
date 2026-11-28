@@ -59,51 +59,6 @@ class AudioRepository(
             }
         }
 
-    /**
-     * Menyalin suara dari klip video layer menjadi track audio baru. Mulai di [startMs] pada timeline film,
-     * diputar dari [trimStartMs] di dalam klip selama [playMs] (null = sampai klip habis).
-     * File disalin karena menghapus track audio juga menghapus filenya.
-     */
-    suspend fun addFromClip(
-        projectId: Long,
-        clip: File,
-        name: String,
-        startMs: Long,
-        trimStartMs: Long,
-        playMs: Long?
-    ): AudioTrackEntity = withContext(Dispatchers.IO) {
-        if (!clip.exists()) throw IOException("File klip tidak ditemukan")
-        if (!storage.hasEnoughSpace()) throw IOException("Penyimpanan hampir penuh")
-        val ext = clip.extension.lowercase(Locale.US).takeIf { it.length in 1..5 && it.all { c -> c.isLetterOrDigit() } } ?: "mp4"
-        val dest = storage.newAudioFile(projectId, ext)
-        try {
-            clip.copyTo(dest, overwrite = false)
-            val duration = readDuration(dest)
-            if (duration <= 1) throw IOException("Klip ini tidak punya suara yang dapat dibaca")
-            val tin = trimStartMs.coerceIn(0L, duration - 1)
-            val tout = if (playMs != null) (tin + playMs).coerceIn(tin + 1, duration) else duration
-            val track = AudioTrackEntity(
-                projectId = projectId,
-                name = name.ifBlank { "Suara klip" },
-                filePath = dest.absolutePath,
-                kind = AudioKind.IMPORT,
-                durationMs = duration,
-                startMs = startMs.coerceAtLeast(0L),
-                trimStartMs = tin,
-                trimEndMs = tout,
-                volume = 1f,
-                fadeInMs = 0,
-                fadeOutMs = 0,
-                muted = false,
-                createdAt = System.currentTimeMillis()
-            )
-            track.copy(id = dao.insert(track))
-        } catch (e: Exception) {
-            dest.delete()
-            throw e
-        }
-    }
-
     suspend fun update(track: AudioTrackEntity) = withContext(Dispatchers.IO) { dao.update(track) }
 
     suspend fun delete(track: AudioTrackEntity) = withContext(Dispatchers.IO) {

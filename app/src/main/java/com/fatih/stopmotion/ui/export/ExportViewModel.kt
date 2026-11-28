@@ -119,7 +119,7 @@ class ExportViewModel(
                         val chroma = ChromaState(
                             p.chromaMode, p.chromaTolerance, p.chromaSoftness, p.chromaBgMode, p.chromaBgPath
                         )
-                        val layerList = layerRepo.getAll(projectId)
+                        val layerList = layerRepo.observe(projectId).first()
                         val c = FrameComposer(frameList, fx, w, h, chroma, layerList, fps)
                         composer = c
                         if (settings.format == ExportFormat.MP4) {
@@ -160,8 +160,5 @@ class ExportViewModelFactory(
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        ExportViewModel(
-            container.repository, container.audioRepository, container.layerRepository,
-            container.storage, projectId
-        ) as T
+        ExportViewModel(container.repository, container.audioRepository, container.layerRepository, container.storage, projectId) as T
 }

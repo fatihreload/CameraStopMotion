@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.Camera
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.compose.animation.core.animateFloatAsState
@@ -72,6 +73,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import android.graphics.Bitmap
 import com.fatih.stopmotion.ui.editor.ChromaBackground
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -84,10 +86,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.material.icons.filled.Tune
-import java.util.concurrent.atomic.AtomicReference
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -215,13 +214,8 @@ private fun CameraContent(
     var lensFacing by rememberSaveable { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
     var flashMode by rememberSaveable { mutableIntStateOf(ImageCapture.FLASH_MODE_OFF) }
     var showGrid by rememberSaveable { mutableStateOf(false) }
-    /** 0 = tidak ada panel, 1 = onion skin, 2 = auto capture, 3 = kualitas foto, 4 = hapus latar */
+    /** 0 = tidak ada panel, 1 = onion skin, 2 = auto capture, 3 = kualitas foto, 4 = hapus latar, 5 = kamera manual */
     var panel by rememberSaveable { mutableIntStateOf(0) }
-    // Kontrol kamera (fokus, WB, eksposur, zoom, shutter, ISO). Tidak disimpan antar sesi aplikasi.
-    var adjust by rememberSaveable(stateSaver = AdjustSaver) { mutableStateOf(CameraAdjust()) }
-    var caps by remember { mutableStateOf(CameraCaps()) }
-    val measuredHolder = remember { AtomicReference(Measured()) }
-    var measuredUi by remember { mutableStateOf(Measured()) }
 
     var isBusy by remember { mutableStateOf(false) }
     var flashEffect by remember { mutableStateOf(false) }
@@ -249,6 +243,16 @@ private fun CameraContent(
 
     // ---------- Kualitas foto dan suara shutter (berlaku untuk semua proyek) ----------
     val settings = remember { AppSettings(context) }
+
+    // ---------- Kamera manual: fokus, AW, EV, zoom, shutter, ISO ----------
+    var pro by remember { mutableStateOf(ProStateCodec.decode(settings.proPrefs)) }
+    var proCaps by remember { mutableStateOf(ProCaps()) }
+    var boundCamera by remember { mutableStateOf<Camera?>(null) }
+    val proController = remember { ProCameraController() }
+    // Rencana dihitung ulang dari pilihan + kemampuan kamera, dan diterapkan setiap kamera/pilihan berubah.
+    LaunchedEffect(boundCamera, pro, proCaps) {
+        boundCamera?.let { proController.apply(it, ProPlan.build(pro, proCaps)) }
+    }
     var qualityIdx by remember { mutableIntStateOf(settings.captureQuality) }
     var shutterOn by remember { mutableStateOf(settings.shutterSound) }
     val shutter = remember { ShutterSound() }
@@ -437,6 +441,7 @@ private fun CameraContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
+                modifier = Modifier.size(40.dp),
                 enabled = hasFlash,
                 onClick = {
                     flashMode = when (flashMode) {
@@ -456,21 +461,21 @@ private fun CameraContent(
                     tint = if (flashMode != ImageCapture.FLASH_MODE_OFF && hasFlash) FatihColors.Purple else Color.White
                 )
             }
-            IconButton(onClick = { panel = if (panel == 4) 0 else 4 }) {
+            IconButton(modifier = Modifier.size(40.dp), onClick = { panel = if (panel == 4) 0 else 4 }) {
                 Icon(
                     Icons.Filled.Wallpaper,
                     contentDescription = "Hapus latar",
                     tint = if (panel == 4 || chroma.active) FatihColors.Purple else Color.White
                 )
             }
-            IconButton(onClick = { showGrid = !showGrid }) {
+            IconButton(modifier = Modifier.size(40.dp), onClick = { showGrid = !showGrid }) {
                 Icon(
                     if (showGrid) Icons.Filled.GridOn else Icons.Filled.GridOff,
                     contentDescription = "Grid",
                     tint = if (showGrid) FatihColors.Purple else Color.White
                 )
             }
-            IconButton(onClick = { panel = if (panel == 3) 0 else 3 }) {
+            IconButton(modifier = Modifier.size(40.dp), onClick = { panel = if (panel == 3) 0 else 3 }) {
                 // Lencana menampilkan kualitas yang sedang dipilih (SD, HD, HD+, 2K, 4K, MAX), bukan ikon HQ tetap.
                 val quality = CaptureQuality.fromIndex(qualityIdx)
                 val tint = if (panel == 3) FatihColors.Purple else Color.White
@@ -490,14 +495,14 @@ private fun CameraContent(
                     )
                 }
             }
-            IconButton(onClick = { panel = if (panel == 5) 0 else 5 }) {
+            IconButton(modifier = Modifier.size(40.dp), onClick = { panel = if (panel == 5) 0 else 5 }) {
                 Icon(
                     Icons.Filled.Tune,
-                    contentDescription = "Kontrol kamera (fokus, WB, eksposur, zoom)",
-                    tint = if (panel == 5 || adjust != CameraAdjust()) FatihColors.Purple else Color.White
+                    contentDescription = "Kamera manual: fokus, AW, EV, zoom, shutter, ISO",
+                    tint = if (panel == 5 || !pro.isDefault) FatihColors.Purple else Color.White
                 )
             }
-            IconButton(onClick = { panel = if (panel == 1) 0 else 1 }) {
+            IconButton(modifier = Modifier.size(40.dp), onClick = { panel = if (panel == 1) 0 else 1 }) {
                 Icon(
                     Icons.Filled.Layers,
                     contentDescription = "Onion skin",
@@ -505,7 +510,7 @@ private fun CameraContent(
                 )
             }
             if (appendMode) {
-                IconButton(onClick = { panel = if (panel == 2) 0 else 2 }) {
+                IconButton(modifier = Modifier.size(40.dp), onClick = { panel = if (panel == 2) 0 else 2 }) {
                     Icon(
                         Icons.Filled.Timelapse,
                         contentDescription = "Auto capture",
@@ -513,6 +518,7 @@ private fun CameraContent(
                     )
                 }
                 IconButton(
+                modifier = Modifier.size(40.dp),
                     enabled = autoState != AutoState.RUNNING,
                     onClick = onOpenEditor
                 ) {
@@ -540,17 +546,17 @@ private fun CameraContent(
                     flashMode = flashMode,
                     captureQuality = CaptureQuality.fromIndex(qualityIdx),
                     chroma = chroma,
-                    adjust = adjust,
-                    onCaps = { caps = it },
-                    onMeasured = {
-                        measuredHolder.set(it)
-                        if (panel == 5) measuredUi = it
-                    },
                     onLiveFrame = { liveKeyed = it },
                     onReady = { ic, flash ->
                         imageCapture = ic
                         hasFlash = flash
                         if (!flash) flashMode = ImageCapture.FLASH_MODE_OFF
+                    },
+                    onCamera = { cam ->
+                        // Kamera dipasang ulang membuat pengaturan manual hilang; hitung dan terapkan lagi.
+                        proController.reset()
+                        proCaps = ProCameraControl.readCaps(cam)
+                        boundCamera = cam
                     },
                     onError = { vm.reportError(it) },
                     modifier = Modifier.fillMaxSize()
@@ -611,29 +617,15 @@ private fun CameraContent(
                     )
                 }
                 if (panel == 5) {
-                    CameraAdjustPanel(
-                        adjust = adjust,
-                        caps = caps,
-                        measured = measuredUi,
-                        enabled = !isBusy,
-                        onFocusMode = { adjust = adjust.withFocusMode(it, measuredHolder.get(), caps) },
-                        onChange = { adjust = it },
-                        onReset = { adjust = CameraAdjust() },
+                    ProPanel(
+                        state = pro,
+                        caps = proCaps,
+                        onChange = {
+                            pro = it
+                            settings.proPrefs = ProStateCodec.encode(it)
+                        },
                         onClose = { panel = 0 },
                         modifier = Modifier.align(Alignment.BottomCenter)
-                    )
-                }
-                if (adjust.zoom > 1.05f && panel != 5) {
-                    Text(
-                        CameraMath.formatZoom(adjust.zoom),
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(8.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.Black.copy(alpha = 0.5f))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
                     )
                 }
                 if (panel == 4) {
@@ -716,7 +708,6 @@ private fun CameraContent(
                     .clickable(enabled = !isBusy && autoState != AutoState.RUNNING) {
                         lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
                             CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-                        adjust = CameraAdjust() // kemampuan tiap lensa berbeda
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -826,17 +817,3 @@ private fun GridOverlay() {
         }
     }
 }
-
-/** Penyimpan [CameraAdjust] agar bertahan saat layar diputar. */
-private val AdjustSaver = listSaver<CameraAdjust, Any>(
-    save = {
-        listOf(it.focusMode, it.focusFraction, it.lockedDiopter, it.awb, it.ev, it.zoom, it.shutterNs, it.iso, it.seededByMode)
-    },
-    restore = {
-        CameraAdjust(
-            focusMode = it[0] as Int, focusFraction = it[1] as Float, lockedDiopter = it[2] as Float,
-            awb = it[3] as Int, ev = it[4] as Int, zoom = it[5] as Float, shutterNs = it[6] as Long,
-            iso = it[7] as Int, seededByMode = it[8] as Boolean
-        )
-    }
-)

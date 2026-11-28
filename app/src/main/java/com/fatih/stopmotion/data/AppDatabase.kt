@@ -77,30 +77,29 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        /** Tahap 9: layer overlay (video/gambar, chroma key per layer). Data lama tetap aman. */
+        /** Tahap layer: tabel layers (gambar/klip video di atas foto). */
+        /** Tahap 9.1: keyframe animasi layer. */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE layers ADD COLUMN keyframes TEXT")
+            }
+        }
+
         private val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     "CREATE TABLE IF NOT EXISTS `layers` (" +
-                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
-                        "`projectId` INTEGER NOT NULL, `name` TEXT NOT NULL, `filePath` TEXT NOT NULL, " +
-                        "`kind` INTEGER NOT NULL, `durationMs` INTEGER NOT NULL, `aspect` REAL NOT NULL, " +
-                        "`hasAudio` INTEGER NOT NULL, `zIndex` INTEGER NOT NULL, `startTick` INTEGER NOT NULL, " +
-                        "`lengthTicks` INTEGER NOT NULL, `trimStartMs` INTEGER NOT NULL, `loop` INTEGER NOT NULL, " +
-                        "`centerX` REAL NOT NULL, `centerY` REAL NOT NULL, `scale` REAL NOT NULL, " +
-                        "`rotation` REAL NOT NULL, `opacity` REAL NOT NULL, `visible` INTEGER NOT NULL, " +
-                        "`chromaMode` INTEGER NOT NULL, `chromaTolerance` REAL NOT NULL, " +
-                        "`chromaSoftness` REAL NOT NULL, `createdAt` INTEGER NOT NULL, " +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `projectId` INTEGER NOT NULL, " +
+                        "`name` TEXT NOT NULL, `kind` INTEGER NOT NULL, `filePath` TEXT NOT NULL, `frameDir` TEXT, " +
+                        "`frameCount` INTEGER NOT NULL, `frameRate` REAL NOT NULL, `srcWidth` INTEGER NOT NULL, " +
+                        "`srcHeight` INTEGER NOT NULL, `zOrder` INTEGER NOT NULL, `startMs` INTEGER NOT NULL, " +
+                        "`durationMs` INTEGER NOT NULL, `loopClip` INTEGER NOT NULL, `posX` REAL NOT NULL, " +
+                        "`posY` REAL NOT NULL, `scale` REAL NOT NULL, `rotation` REAL NOT NULL, `opacity` REAL NOT NULL, " +
+                        "`chromaMode` INTEGER NOT NULL, `chromaTolerance` REAL NOT NULL, `chromaSoftness` REAL NOT NULL, " +
+                        "`visible` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, " +
                         "FOREIGN KEY(`projectId`) REFERENCES `projects`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_layers_projectId` ON `layers` (`projectId`)")
-            }
-        }
-
-        /** Tahap 10: keyframe layer. Kolom baru boleh kosong, jadi layer lama tetap tanpa animasi. */
-        private val MIGRATION_7_8 = object : Migration(7, 8) {
-            override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE `layers` ADD COLUMN `keyframes` TEXT")
             }
         }
 

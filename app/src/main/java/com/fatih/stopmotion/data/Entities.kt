@@ -63,6 +63,66 @@ data class FrameEntity(
     val eraseData: String? = null
 )
 
+object LayerKind {
+    const val IMAGE = 0
+    const val VIDEO = 1
+}
+
+/**
+ * Layer tambahan di atas foto stop motion (gambar atau klip video, mis. efek peluru berlatar hijau).
+ * Klip video diekstrak menjadi urutan JPEG (frameDir) saat ditambahkan, sehingga pratinjau dan ekspor tidak
+ * bergantung pada decoder video. Posisi dinormalkan: posX/posY = pusat layer (0..1 dari bingkai),
+ * scale = lebar layer sebagai pecahan lebar bingkai.
+ */
+@Entity(
+    tableName = "layers",
+    foreignKeys = [
+        ForeignKey(
+            entity = ProjectEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["projectId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index("projectId")]
+)
+data class LayerEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val projectId: Long,
+    val name: String,
+    /** Lihat LayerKind. */
+    val kind: Int,
+    /** Berkas sumber (gambar atau video) di folder layer. */
+    val filePath: String,
+    /** Video: folder JPEG hasil ekstraksi (00001.jpg, ...). Gambar: null. */
+    val frameDir: String?,
+    val frameCount: Int,
+    /** Video: frame per detik hasil ekstraksi. */
+    val frameRate: Float,
+    val srcWidth: Int,
+    val srcHeight: Int,
+    /** Urutan tumpukan: makin besar makin di atas. */
+    val zOrder: Int,
+    /** Waktu mulai dan lama tampil pada timeline film. */
+    val startMs: Long,
+    val durationMs: Long,
+    /** Video: diputar berulang bila durasi tampil lebih panjang dari klip. */
+    val loopClip: Boolean,
+    val posX: Float = 0.5f,
+    val posY: Float = 0.5f,
+    val scale: Float = 0.5f,
+    val rotation: Float = 0f,
+    val opacity: Float = 1f,
+    /** Penghapus latar khusus layer ini (ChromaMode). */
+    val chromaMode: Int = 0,
+    val chromaTolerance: Float = 0.4f,
+    val chromaSoftness: Float = 0.3f,
+    val visible: Boolean = true,
+    val createdAt: Long,
+    /** Keyframe animasi (lihat KeyframeCodec), null = tanpa animasi. */
+    val keyframes: String? = null
+)
+
 object AudioKind {
     const val IMPORT = 0
     const val RECORD = 1
@@ -98,57 +158,6 @@ data class AudioTrackEntity(
     val fadeOutMs: Long,
     val muted: Boolean,
     val createdAt: Long
-)
-
-/**
- * Layer overlay di atas foto (video atau gambar), mis. klip efek peluru berlatar green screen.
- * Layer 1 adalah foto frame; layer ini menjadi layer 2, 3, dst. menurut zIndex (makin besar makin di atas).
- * Posisi dan ukuran dinormalisasi terhadap lebar/tinggi layar film, jadi sama di pratinjau dan ekspor.
- */
-@Entity(
-    tableName = "layers",
-    foreignKeys = [
-        ForeignKey(
-            entity = ProjectEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["projectId"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ],
-    indices = [Index("projectId")]
-)
-data class LayerEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val projectId: Long,
-    val name: String,
-    val filePath: String,
-    /** Lihat LayerKind: 0 = gambar, 1 = video. */
-    val kind: Int,
-    val durationMs: Long,
-    /** Lebar dibagi tinggi media. */
-    val aspect: Float,
-    val hasAudio: Boolean,
-    val zIndex: Int,
-    /** Mulai dan panjang di timeline film, dalam tick (1 tick = 1 / FPS detik). */
-    val startTick: Int,
-    val lengthTicks: Int,
-    val trimStartMs: Long,
-    val loop: Boolean,
-    /** Pusat layer: 0..1 = di dalam layar film. */
-    val centerX: Float,
-    val centerY: Float,
-    /** Lebar layer dibagi lebar layar film. */
-    val scale: Float,
-    val rotation: Float,
-    val opacity: Float,
-    val visible: Boolean,
-    /** Chroma key khusus layer ini: 0 = mati, 1 = hijau, 2 = biru. */
-    val chromaMode: Int,
-    val chromaTolerance: Float,
-    val chromaSoftness: Float,
-    val createdAt: Long,
-    /** Animasi keyframe (posisi/ukuran/putar/transparan) dalam format Keyframes.encode, atau null = tanpa animasi. */
-    val keyframes: String? = null
 )
 
 data class ProjectSummary(

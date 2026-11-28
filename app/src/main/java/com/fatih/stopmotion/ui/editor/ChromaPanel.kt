@@ -173,7 +173,7 @@ fun ChromaPanel(
 }
 
 @Composable
-private fun MiniChip(label: String, swatch: Color?, selected: Boolean, onClick: () -> Unit) {
+internal fun MiniChip(label: String, swatch: Color?, selected: Boolean, onClick: () -> Unit) {
     Row(
         Modifier
             .clip(RoundedCornerShape(16.dp))

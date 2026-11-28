@@ -1,25 +1,21 @@
 package com.fatih.stopmotion.data
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
-import com.fatih.stopmotion.fx.ChromaMode
-import com.fatih.stopmotion.layers.LayerFiles
-import com.fatih.stopmotion.layers.LayerKind
-import com.fatih.stopmotion.layers.LayerLimits
-import com.fatih.stopmotion.layers.LayerMedia
-import com.fatih.stopmotion.layers.LayerTiming
-import com.fatih.stopmotion.layers.sanitized
+import com.fatih.stopmotion.fx.ImageFx
+import com.fatih.stopmotion.fx.LayerTiming
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.util.Locale
 
-/**
- * Layer overlay (video atau gambar) di atas foto. File media disalin ke folder proyek (layers/)
- * karena izin akses file dari pemilih file tidak bertahan lama.
- */
 class LayerRepository(
     private val context: Context,
     db: AppDatabase,
@@ -27,109 +23,160 @@ class LayerRepository(
 ) {
     private val dao = db.layerDao()
 
+    data class AddedVideo(val layer: LayerEntity, val hasAudio: Boolean)
+
     fun observe(projectId: Long): Flow<List<LayerEntity>> = dao.observe(projectId)
 
-    suspend fun getAll(projectId: Long): List<LayerEntity> = withContext(Dispatchers.IO) { dao.getAll(projectId) }
+    suspend fun updateProps(l: LayerEntity) = withContext(Dispatchers.IO) {
+        dao.updateProps(
+            l.id, l.name, l.visible, l.startMs.coerceAtLeast(0), l.durationMs.coerceAtLeast(100),
+            l.loopClip, l.posX.coerceIn(-0.5f, 1.5f), l.posY.coerceIn(-0.5f, 1.5f),
+            l.scale.coerceIn(0.03f, 4f), l.rotation, l.opacity.coerceIn(0f, 1f),
+            l.chromaMode.coerceIn(0, 2), l.chromaTolerance.coerceIn(0f, 1f), l.chromaSoftness.coerceIn(0f, 1f),
+            com.fatih.stopmotion.fx.KeyframeCodec.encode(com.fatih.stopmotion.fx.KeyframeCodec.decode(l.keyframes))
+        )
+    }
 
-    /**
-     * Menambah layer dari file pilihan pengguna. Layer baru berada paling atas, mulai di [startTick].
-     * Video: panjang mengikuti durasi klip. Gambar: sampai akhir film.
-     */
-    suspend fun addFromUri(projectId: Long, uri: Uri, startTick: Int, fps: Int, totalTicks: Int): LayerEntity =
+    suspend fun delete(l: LayerEntity) = withContext(Dispatchers.IO) {
+        dao.delete(l.id)
+        File(l.filePath).parentFile?.deleteRecursively()
+    }
+
+    /** up = naik ke depan (tampil di atas layer lain). Urutan ditulis ulang berurutan agar tidak ada nilai kembar. */
+    suspend fun move(projectId: Long, id: Long, up: Boolean) = withContext(Dispatchers.IO) {
+        val list = dao.getAll(projectId)
+        val i = list.indexOfFirst { it.id == id }
+        val j = if (up) i + 1 else i - 1
+        if (i < 0 || j !in list.indices) return@withContext
+        val reordered = list.toMutableList()
+        val t = reordered[i]; reordered[i] = reordered[j]; reordered[j] = t
+        reordered.forEachIndexed { z, l -> if (l.zOrder != z) dao.updateZ(l.id, z) }
+    }
+
+    private suspend fun checkCanAdd(projectId: Long) {
+        if (dao.getAll(projectId).size >= LayerTiming.MAX_LAYERS) {
+            throw IOException("Maksimal ${LayerTiming.MAX_LAYERS} layer per proyek")
+        }
+        if (!storage.hasEnoughSpace(100L * 1024 * 1024)) throw IOException("Penyimpanan hampir penuh")
+    }
+
+    /** Menambah layer gambar (PNG transparan didukung). Gambar diperkecil maksimal 2048 px. */
+    suspend fun addImage(projectId: Long, uri: Uri, startMs: Long, durationMs: Long): LayerEntity =
         withContext(Dispatchers.IO) {
-            if (!storage.hasEnoughSpace()) throw IOException("Penyimpanan hampir penuh")
-            if (dao.getAll(projectId).size >= LayerLimits.MAX_LAYERS) {
-                throw IOException("Maksimum ${LayerLimits.MAX_LAYERS} layer per proyek")
-            }
-            val display = displayName(uri)
-            val mime = context.contentResolver.getType(uri)
-            val kind = LayerFiles.kindOf(mime, display) ?: throw IOException("Pilih file video atau gambar")
-            val isVideo = kind == LayerKind.VIDEO
-            val fallbackExt = if (isVideo) "mp4" else "jpg"
-            val dest = storage.newLayerFile(projectId, LayerFiles.safeExtension(display, fallbackExt))
+            checkCanAdd(projectId)
+            val dir = storage.newLayerDir(projectId)
             try {
-                val input = context.contentResolver.openInputStream(uri) ?: throw IOException("File tidak dapat dibuka")
-                input.use { src -> dest.outputStream().use { src.copyTo(it) } }
-                val probe = LayerMedia.probe(dest, isVideo)
-                    ?: throw IOException(if (isVideo) "Video tidak dapat dibaca" else "Gambar tidak dapat dibaca")
-
-                val start = startTick.coerceIn(0, LayerLimits.MAX_TICKS)
-                val length = if (isVideo) {
-                    LayerTiming.videoLengthTicks(probe.durationMs, 0L, fps)
-                } else {
-                    (totalTicks - start).coerceAtLeast(1)
+                val tmp = File(dir, "src.tmp")
+                copyUri(uri, tmp)
+                val bmp = ImageFx.decode(tmp.path, 2048) ?: throw IOException("Gambar tidak dapat dibaca")
+                val alpha = bmp.hasAlpha()
+                val out = File(dir, if (alpha) "src.png" else "src.jpg")
+                out.outputStream().use {
+                    bmp.compress(if (alpha) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG, 92, it)
                 }
-                val top = (dao.getAll(projectId).maxOfOrNull { it.zIndex } ?: 0) + 1
-                val layer = LayerEntity(
-                    projectId = projectId,
-                    name = (display ?: "Layer").substringBeforeLast('.').ifBlank { "Layer" },
-                    filePath = dest.absolutePath,
-                    kind = kind,
-                    durationMs = probe.durationMs,
-                    aspect = probe.aspect,
-                    hasAudio = probe.hasAudio,
-                    zIndex = top,
-                    startTick = start,
-                    lengthTicks = length,
-                    trimStartMs = 0L,
-                    loop = false,
-                    centerX = 0.5f,
-                    centerY = 0.5f,
-                    scale = if (isVideo) 1f else 0.5f,
-                    rotation = 0f,
-                    opacity = 1f,
-                    visible = true,
-                    chromaMode = ChromaMode.OFF,
-                    chromaTolerance = 0.4f,
-                    chromaSoftness = 0.3f,
-                    createdAt = System.currentTimeMillis()
-                ).sanitized()
-                layer.copy(id = dao.insert(layer))
-            } catch (e: Exception) {
-                dest.delete()
+                val w = bmp.width
+                val h = bmp.height
+                bmp.recycle()
+                tmp.delete()
+                val name = baseName(uri, "Gambar")
+                val l = LayerEntity(
+                    projectId = projectId, name = name, kind = LayerKind.IMAGE, filePath = out.absolutePath,
+                    frameDir = null, frameCount = 1, frameRate = 0f, srcWidth = w, srcHeight = h,
+                    zOrder = dao.maxZ(projectId) + 1, startMs = startMs.coerceAtLeast(0),
+                    durationMs = durationMs.coerceAtLeast(500), loopClip = false,
+                    scale = 0.5f, createdAt = System.currentTimeMillis()
+                )
+                l.copy(id = dao.insert(l))
+            } catch (e: Throwable) {
+                dir.deleteRecursively()
                 throw e
             }
         }
 
-    suspend fun update(layer: LayerEntity) = withContext(Dispatchers.IO) { dao.update(layer.sanitized()) }
-
-    suspend fun delete(layer: LayerEntity) = withContext(Dispatchers.IO) {
-        dao.delete(layer.id)
-        File(layer.filePath).delete()
-    }
-
-    /** Menyalin layer (termasuk file media) tepat di atas layer asal. */
-    suspend fun duplicate(layer: LayerEntity): LayerEntity = withContext(Dispatchers.IO) {
-        if (!storage.hasEnoughSpace()) throw IOException("Penyimpanan hampir penuh")
-        val src = File(layer.filePath)
-        if (!src.exists()) throw IOException("File layer tidak ditemukan")
-        val dest = storage.newLayerFile(layer.projectId, LayerFiles.safeExtension(src.name, "bin"))
+    /**
+     * Menambah layer klip video. Klip diekstrak menjadi JPEG pada fps proyek (maksimal 30 fps dan 240 frame),
+     * sehingga klip panjang dipotong. chromaMode != 0 langsung menghapus latar hijau/biru klip.
+     */
+    suspend fun addVideo(
+        projectId: Long,
+        uri: Uri,
+        startMs: Long,
+        fps: Int,
+        chromaMode: Int,
+        onProgress: (Float) -> Unit
+    ): AddedVideo = withContext(Dispatchers.IO) {
+        checkCanAdd(projectId)
+        val dir = storage.newLayerDir(projectId)
         try {
-            src.copyTo(dest, overwrite = false)
-            val all = dao.getAll(layer.projectId)
-            val copy = layer.copy(
-                id = 0,
-                name = (layer.name.take(31) + " (salinan)").take(40),
-                filePath = dest.absolutePath,
-                zIndex = (all.maxOfOrNull { it.zIndex } ?: 0) + 1,
-                createdAt = System.currentTimeMillis()
-            ).sanitized()
-            copy.copy(id = dao.insert(copy))
-        } catch (e: Exception) {
-            dest.delete()
+            val display = displayName(uri) ?: "Klip"
+            val ext = display.substringAfterLast('.', "").lowercase(Locale.US)
+                .takeIf { it.length in 2..4 && it.all { c -> c.isLetterOrDigit() } } ?: "mp4"
+            val src = File(dir, "src.$ext")
+            copyUri(uri, src)
+
+            val retriever = MediaMetadataRetriever()
+            try {
+                retriever.setDataSource(src.absolutePath)
+                val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+                if (durationMs <= 0) throw IOException("Klip video tidak dapat dibaca")
+                val hasAudio = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) == "yes"
+                val rate = fps.coerceIn(1, 30)
+                val count = (durationMs * rate / 1000).toInt().coerceIn(1, MAX_VIDEO_FRAMES)
+                val frameDir = File(dir, "f").apply { mkdirs() }
+
+                var w = 0
+                var h = 0
+                var last: File? = null
+                for (i in 0 until count) {
+                    currentCoroutineContext().ensureActive()
+                    val f = File(frameDir, String.format(Locale.US, "%05d.jpg", i + 1))
+                    val raw = retriever.getFrameAtTime(i * 1_000_000L / rate, MediaMetadataRetriever.OPTION_CLOSEST)
+                    if (raw == null) {
+                        // Frame di ujung klip kadang tidak terbaca: pakai frame sebelumnya.
+                        (last ?: throw IOException("Frame video tidak dapat dibaca")).copyTo(f, overwrite = true)
+                    } else {
+                        val bmp = shrink(raw, FRAME_MAX_SIDE)
+                        if (w == 0) { w = bmp.width; h = bmp.height }
+                        f.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 88, it) }
+                        bmp.recycle()
+                    }
+                    last = f
+                    onProgress((i + 1f) / count)
+                }
+                val shownMs = count * 1000L / rate
+                val l = LayerEntity(
+                    projectId = projectId, name = baseName(uri, "Klip"), kind = LayerKind.VIDEO,
+                    filePath = src.absolutePath, frameDir = frameDir.absolutePath, frameCount = count,
+                    frameRate = rate.toFloat(), srcWidth = w.coerceAtLeast(1), srcHeight = h.coerceAtLeast(1),
+                    zOrder = dao.maxZ(projectId) + 1, startMs = startMs.coerceAtLeast(0), durationMs = shownMs,
+                    loopClip = false, scale = 1f, chromaMode = chromaMode.coerceIn(0, 2),
+                    createdAt = System.currentTimeMillis()
+                )
+                AddedVideo(l.copy(id = dao.insert(l)), hasAudio)
+            } finally {
+                runCatching { retriever.release() }
+            }
+        } catch (e: Throwable) {
+            dir.deleteRecursively()
             throw e
         }
     }
 
-    /** Menaikkan atau menurunkan layer satu tingkat di tumpukan, lalu merapikan nomor urut. */
-    suspend fun moveZ(projectId: Long, layerId: Long, up: Boolean) = withContext(Dispatchers.IO) {
-        val list = dao.getAll(projectId).toMutableList()
-        val i = list.indexOfFirst { it.id == layerId }
-        val j = if (up) i + 1 else i - 1
-        if (i < 0 || j < 0 || j >= list.size) return@withContext
-        val t = list[i]; list[i] = list[j]; list[j] = t
-        val changed = list.mapIndexedNotNull { idx, l -> if (l.zIndex != idx) l.copy(zIndex = idx) else null }
-        if (changed.isNotEmpty()) dao.updateAll(changed)
+    private fun shrink(src: Bitmap, maxSide: Int): Bitmap {
+        val longSide = maxOf(src.width, src.height)
+        if (longSide <= maxSide) return src
+        val s = maxSide / longSide.toFloat()
+        val out = Bitmap.createScaledBitmap(
+            src, (src.width * s).toInt().coerceAtLeast(1), (src.height * s).toInt().coerceAtLeast(1), true
+        )
+        if (out !== src) src.recycle()
+        return out
+    }
+
+    private fun copyUri(uri: Uri, dest: File) {
+        val input = context.contentResolver.openInputStream(uri) ?: throw IOException("File tidak dapat dibuka")
+        input.use { src -> dest.outputStream().use { src.copyTo(it) } }
     }
 
     private fun displayName(uri: Uri): String? = try {
@@ -138,5 +185,13 @@ class LayerRepository(
         }
     } catch (e: Exception) {
         null
+    }
+
+    private fun baseName(uri: Uri, fallback: String): String =
+        (displayName(uri)?.substringBeforeLast('.') ?: fallback).let { ProjectNames.clean(it) }.ifEmpty { fallback }
+
+    companion object {
+        const val MAX_VIDEO_FRAMES = 240
+        private const val FRAME_MAX_SIDE = 960
     }
 }

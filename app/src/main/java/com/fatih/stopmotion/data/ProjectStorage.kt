@@ -22,8 +22,19 @@ class ProjectStorage(private val context: Context) {
     fun thumbsDir(id: Long): File = File(projectDir(id), "thumbs").apply { mkdirs() }
 
     fun audioDir(id: Long): File = File(projectDir(id), "audio").apply { mkdirs() }
-    fun layersDir(id: Long): File = File(projectDir(id), "layers").apply { mkdirs() }
     fun bgDir(id: Long): File = File(projectDir(id), "bg").apply { mkdirs() }
+    fun layersDir(id: Long): File = File(projectDir(id), "layers").apply { mkdirs() }
+
+    /** Folder baru untuk satu layer: berisi src.* (sumber) dan, untuk video, f/00001.jpg dst. */
+    fun newLayerDir(projectId: Long): File {
+        var d: File
+        do {
+            d = File(layersDir(projectId), "L${System.currentTimeMillis()}_${(0..99999).random()}")
+        } while (d.exists())
+        d.mkdirs()
+        return d
+    }
+
     fun exportsDir(id: Long): File = File(projectDir(id), "exports").apply { mkdirs() }
 
     fun newFrameFile(projectId: Long): File {
@@ -46,14 +57,6 @@ class ProjectStorage(private val context: Context) {
         var f: File
         do {
             f = File(audioDir(projectId), "audio_${System.currentTimeMillis()}_${(0..99999).random()}.$ext")
-        } while (f.exists())
-        return f
-    }
-
-    fun newLayerFile(projectId: Long, ext: String): File {
-        var f: File
-        do {
-            f = File(layersDir(projectId), "layer_${System.currentTimeMillis()}_${(0..99999).random()}.$ext")
         } while (f.exists())
         return f
     }

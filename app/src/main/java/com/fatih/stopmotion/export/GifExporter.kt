@@ -213,18 +213,14 @@ object GifExporter {
         val h = composer.height
         val total = composer.totalTicks
 
-        // Tick berurutan yang identik (frame dan layer sama, tanpa fade) digabung menjadi satu frame GIF dengan jeda lebih lama.
+        // Tick berurutan yang identik (frame sama, tanpa fade) digabung menjadi satu frame GIF dengan jeda lebih lama.
         val runs = ArrayList<Run>()
-        var lastKey = -1L
-        var lastStatic = false
+        var lastSig: List<Int>? = null
         for (t in 0 until total) {
-            val static = composer.isStatic(t)
-            // Kunci isi = frame foto + keadaan semua layer (video layer yang bergerak membuat tiap tick berbeda).
-            val key = composer.contentKey(t)
-            if (static && lastStatic && key == lastKey) runs.last().endTick = t + 1
+            val sig = composer.signature(t)
+            if (sig == lastSig) runs.last().endTick = t + 1
             else runs.add(Run(t, t + 1))
-            lastKey = key
-            lastStatic = static
+            lastSig = sig
         }
 
         val argb = IntArray(w * h)

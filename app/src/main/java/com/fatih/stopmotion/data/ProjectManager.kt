@@ -29,8 +29,7 @@ class ProjectManager(
         val frameCount: Int,
         val ticks: Int,
         val audioCount: Int,
-        val bytes: Long,
-        val layerCount: Int = 0
+        val bytes: Long
     )
 
     data class StorageStats(val projectsBytes: Long, val freeBytes: Long)
@@ -43,8 +42,7 @@ class ProjectManager(
             frameCount = frames.size,
             ticks = frames.sumOf { it.holdCount.coerceAtLeast(1) },
             audioCount = audioDao.getAll(id).size,
-            bytes = storage.projectBytes(id),
-            layerCount = layerDao.getAll(id).size
+            bytes = storage.projectBytes(id)
         )
     }
 
@@ -70,7 +68,7 @@ class ProjectManager(
         )
         try {
             storage.projectDir(newId)
-            val total = (frames.size + tracks.size + layers.size).coerceAtLeast(1)
+            val total = (frames.size + tracks.size).coerceAtLeast(1)
             var done = 0
             var lastThumb: String? = null
             for (f in frames) {
@@ -95,11 +93,19 @@ class ProjectManager(
             }
             for (l in layers) {
                 ensureActive()
-                val ext = File(l.filePath).extension.ifEmpty { "bin" }
-                val dest = storage.newLayerFile(newId, ext)
-                File(l.filePath).copyTo(dest, overwrite = false)
-                layerDao.insert(l.copy(id = 0, projectId = newId, filePath = dest.absolutePath))
-                onProgress(++done / total.toFloat())
+                val dir = storage.newLayerDir(newId)
+                val srcFile = File(l.filePath)
+                if (l.kind == LayerKind.IMAGE) {
+                    srcFile.copyTo(File(dir, srcFile.name), overwrite = false)
+                } else {
+                    l.frameDir?.let { File(it).copyRecursively(File(dir, "f"), overwrite = false) }
+                }
+                layerDao.insert(
+                    l.copy(
+                        id = 0, projectId = newId, filePath = File(dir, srcFile.name).absolutePath,
+                        frameDir = if (l.kind == LayerKind.VIDEO) File(dir, "f").absolutePath else null
+                    )
+                )
             }
             src.chromaBgPath?.let { File(it) }?.takeIf { it.exists() }?.let { bg ->
                 val dest = storage.newBgFile(newId, bg.extension.ifEmpty { "jpg" })
@@ -122,7 +128,8 @@ class ProjectManager(
             val frames = frameDao.getFrames(id)
             val tracks = audioDao.getAll(id)
             val layers = layerDao.getAll(id)
-            val total = (frames.size + tracks.size + layers.size).coerceAtLeast(1)
+            val total = (frames.size + tracks.size + layers.sumOf { if (it.kind == LayerKind.IMAGE) 1 else it.frameCount })
+                .coerceAtLeast(1)
             var done = 0
             val bgFile = p.chromaBgPath?.let { File(it) }?.takeIf { it.exists() }
             val bgEntry = bgFile?.let { BackupManifest.backgroundEntry(it.path) }
@@ -149,12 +156,25 @@ class ProjectManager(
                     zip.closeEntry()
                     onProgress(++done / total.toFloat())
                 }
-                layers.sortedBy { it.zIndex }.forEachIndexed { i, l ->
-                    ensureActive()
-                    zip.putNextEntry(ZipEntry(BackupManifest.layerEntry(i, l.filePath)))
-                    File(l.filePath).inputStream().use { it.copyTo(zip) }
-                    zip.closeEntry()
-                    onProgress(++done / total.toFloat())
+                // Layer: gambar disimpan apa adanya; klip video hanya frame JPEG-nya (video asli tidak diperlukan lagi).
+                layers.forEachIndexed { i, l ->
+                    if (l.kind == LayerKind.IMAGE) {
+                        ensureActive()
+                        zip.putNextEntry(ZipEntry(BackupManifest.layerImageEntry(i, l.filePath)))
+                        File(l.filePath).inputStream().use { it.copyTo(zip) }
+                        zip.closeEntry()
+                        onProgress(++done / total.toFloat())
+                    } else {
+                        for (n in 1..l.frameCount) {
+                            ensureActive()
+                            val f = File(l.frameDir ?: "", String.format(java.util.Locale.US, "%05d.jpg", n))
+                            if (!f.exists()) throw IOException("Frame klip \"${l.name}\" hilang")
+                            zip.putNextEntry(ZipEntry(BackupManifest.layerFrameEntry(i, n)))
+                            f.inputStream().use { it.copyTo(zip) }
+                            zip.closeEntry()
+                            onProgress(++done / total.toFloat())
+                        }
+                    }
                 }
             }
         }
@@ -179,10 +199,13 @@ class ProjectManager(
                 val frameIndex = HashMap<String, Int>()
                 parsed.frames.forEachIndexed { i, m -> frameIndex[m.file] = i }
                 val audioByFile = parsed.audio.associateBy { it.file }
-                val layerByFile = parsed.layers.associateBy { it.file }
                 val frameDone = BooleanArray(parsed.frames.size)
-                val total = (parsed.frames.size + parsed.audio.size + parsed.layers.size).coerceAtLeast(1)
+                val total = (parsed.frames.size + parsed.audio.size +
+                    parsed.layers.sumOf { it.frameCount }).coerceAtLeast(1)
                 var done = 0
+                val layerDirs = HashMap<Int, File>()
+                val layerImage = HashMap<Int, File>()
+                val layerGot = IntArray(parsed.layers.size)
 
                 while (true) {
                     ensureActive()
@@ -190,7 +213,6 @@ class ProjectManager(
                     if (e.isDirectory) continue
                     val fi = frameIndex[e.name]
                     val am = audioByFile[e.name]
-                    val lm = layerByFile[e.name]
                     if (parsed.backgroundFile != null && e.name == parsed.backgroundFile) {
                         val ext = BackupManifest.backgroundEntry(e.name).substringAfter('.')
                         val dest = storage.newBgFile(newId, ext)
@@ -215,6 +237,33 @@ class ProjectManager(
                         )
                         frameDone[fi] = true
                         onProgress(++done / total.toFloat())
+                    } else if (LAYER_ENTRY.matches(e.name)) {
+                        val m = LAYER_ENTRY.matchEntire(e.name)!!
+                        val li = m.groupValues[1].toInt() - 1
+                        val rest = m.groupValues[2]
+                        val meta = parsed.layers.getOrNull(li)
+                        if (meta != null) {
+                            val dir = layerDirs.getOrPut(li) { storage.newLayerDir(newId) }
+                            if (meta.kind == LayerKind.IMAGE) {
+                                val ext = IMAGE_NAME.matchEntire(rest)?.groupValues?.get(1)
+                                if (ext != null && !layerImage.containsKey(li)) {
+                                    val dest = File(dir, "src.$ext")
+                                    dest.outputStream().use { zip.copyTo(it) }
+                                    layerImage[li] = dest
+                                    layerGot[li]++
+                                    onProgress(++done / total.toFloat())
+                                }
+                            } else {
+                                val n = FRAME_NAME.matchEntire(rest)?.groupValues?.get(1)?.toInt()
+                                if (n != null && n in 1..meta.frameCount) {
+                                    val fdir = File(dir, "f").apply { mkdirs() }
+                                    File(fdir, String.format(java.util.Locale.US, "%05d.jpg", n))
+                                        .outputStream().use { zip.copyTo(it) }
+                                    layerGot[li]++
+                                    onProgress(++done / total.toFloat())
+                                }
+                            }
+                        }
                     } else if (am != null) {
                         val ext = File(am.file).extension.ifEmpty { "bin" }
                         val dest = storage.newAudioFile(newId, ext)
@@ -229,21 +278,29 @@ class ProjectManager(
                             )
                         )
                         onProgress(++done / total.toFloat())
-                    } else if (lm != null) {
-                        val ext = File(lm.file).extension.ifEmpty { "bin" }
-                        val dest = storage.newLayerFile(newId, ext)
-                        dest.outputStream().use { zip.copyTo(it) }
-                        layerDao.insert(
-                            lm.layer.copy(
-                                projectId = newId,
-                                filePath = dest.absolutePath,
-                                createdAt = if (lm.layer.createdAt > 0) lm.layer.createdAt else now
-                            )
-                        )
-                        onProgress(++done / total.toFloat())
                     }
                 }
                 if (frameDone.any { !it }) throw IOException("File cadangan tidak lengkap")
+                parsed.layers.forEachIndexed { li, meta ->
+                    val dir = layerDirs[li]
+                    val expected = if (meta.kind == LayerKind.IMAGE) 1 else meta.frameCount
+                    if (dir == null || layerGot[li] < expected) throw IOException("File cadangan tidak lengkap (layer ${li + 1})")
+                    layerDao.insert(
+                        LayerEntity(
+                            projectId = newId, name = meta.name, kind = meta.kind,
+                            filePath = (layerImage[li] ?: File(dir, "src.mp4")).absolutePath,
+                            frameDir = if (meta.kind == LayerKind.VIDEO) File(dir, "f").absolutePath else null,
+                            frameCount = meta.frameCount, frameRate = meta.frameRate,
+                            srcWidth = meta.srcWidth, srcHeight = meta.srcHeight, zOrder = meta.zOrder,
+                            startMs = meta.startMs, durationMs = meta.durationMs, loopClip = meta.loopClip,
+                            posX = meta.posX, posY = meta.posY, scale = meta.scale, rotation = meta.rotation,
+                            opacity = meta.opacity, chromaMode = meta.chromaMode,
+                            chromaTolerance = meta.chromaTolerance, chromaSoftness = meta.chromaSoftness,
+                            visible = meta.visible, createdAt = if (meta.createdAt > 0) meta.createdAt else now,
+                            keyframes = meta.keyframes
+                        )
+                    )
+                }
                 db.withTransaction {
                     projectDao.touch(newId, now, frameDao.getFrames(newId).lastOrNull()?.thumbPath)
                 }
@@ -254,6 +311,13 @@ class ProjectManager(
                 throw e
             }
         }
+
+    private companion object {
+        /** Entri layer di ZIP: layers/001/<berkas>. Nama dibatasi ketat agar tidak ada path dari luar yang dipakai. */
+        val LAYER_ENTRY = Regex("^layers/(\\d{3})/([^/]+)$")
+        val FRAME_NAME = Regex("^(\\d{5})\\.jpg$")
+        val IMAGE_NAME = Regex("^src\\.([A-Za-z0-9]{1,5})$")
+    }
 
     private fun readLimited(input: InputStream, limit: Int): ByteArray {
         val out = java.io.ByteArrayOutputStream()

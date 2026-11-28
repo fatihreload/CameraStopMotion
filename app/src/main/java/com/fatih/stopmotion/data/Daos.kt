@@ -142,19 +142,31 @@ interface LayerDao {
     @Insert
     suspend fun insert(layer: LayerEntity): Long
 
-    @Update
-    suspend fun update(layer: LayerEntity)
-
-    @Update
-    suspend fun updateAll(layers: List<LayerEntity>)
-
     @Query("DELETE FROM layers WHERE id = :id")
     suspend fun delete(id: Long)
 
-    /** Urut dari layer terbawah ke teratas. */
-    @Query("SELECT * FROM layers WHERE projectId = :projectId ORDER BY zIndex ASC, id ASC")
+    @Query("SELECT * FROM layers WHERE projectId = :projectId ORDER BY zOrder ASC, id ASC")
+    fun observe(projectId: Long): Flow<List<LayerEntity>>
+
+    @Query("SELECT * FROM layers WHERE projectId = :projectId ORDER BY zOrder ASC, id ASC")
     suspend fun getAll(projectId: Long): List<LayerEntity>
 
-    @Query("SELECT * FROM layers WHERE projectId = :projectId ORDER BY zIndex ASC, id ASC")
-    fun observe(projectId: Long): Flow<List<LayerEntity>>
+    @Query("SELECT COALESCE(MAX(zOrder), -1) FROM layers WHERE projectId = :projectId")
+    suspend fun maxZ(projectId: Long): Int
+
+    @Query("UPDATE layers SET zOrder = :z WHERE id = :id")
+    suspend fun updateZ(id: Long, z: Int)
+
+    /** Semua pengaturan yang bisa diedit pengguna, kecuali urutan tumpukan (diatur terpisah lewat updateZ). */
+    @Query(
+        "UPDATE layers SET name = :name, visible = :visible, startMs = :startMs, durationMs = :durationMs, " +
+            "loopClip = :loop, posX = :posX, posY = :posY, scale = :scale, rotation = :rotation, opacity = :opacity, " +
+            "chromaMode = :chromaMode, chromaTolerance = :chromaTolerance, chromaSoftness = :chromaSoftness, " +
+            "keyframes = :keyframes WHERE id = :id"
+    )
+    suspend fun updateProps(
+        id: Long, name: String, visible: Boolean, startMs: Long, durationMs: Long, loop: Boolean,
+        posX: Float, posY: Float, scale: Float, rotation: Float, opacity: Float,
+        chromaMode: Int, chromaTolerance: Float, chromaSoftness: Float, keyframes: String?
+    )
 }

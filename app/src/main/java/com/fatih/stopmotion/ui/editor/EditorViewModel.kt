@@ -15,6 +15,7 @@ import com.fatih.stopmotion.data.ProjectEntity
 import com.fatih.stopmotion.data.ProjectRepository
 import com.fatih.stopmotion.fx.ChromaState
 import com.fatih.stopmotion.fx.FxState
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -27,11 +28,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import java.io.File
+import java.util.concurrent.CancellationException
+
+/** Proses menambah layer yang sedang berjalan. progress null = tidak diketahui (gambar). */
+data class LayerBusy(val progress: Float?, val label: String)
 
 class EditorViewModel(
     private val repo: ProjectRepository,
-    private val audioRepo: AudioRepository,
+    audioRepo: AudioRepository,
     private val chromaRepo: ChromaRepository,
     private val layerRepo: LayerRepository,
     private val projectId: Long
@@ -46,13 +50,12 @@ class EditorViewModel(
     val audio: StateFlow<List<AudioTrackEntity>> = audioRepo.observe(projectId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** Layer overlay (layer 2, 3, dst.), urut dari yang terbawah. */
     val layers: StateFlow<List<LayerEntity>> = layerRepo.observe(projectId)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    private val _layerBusy = MutableStateFlow(false)
-    /** True selama file video/gambar layer sedang disalin ke proyek. */
-    val layerBusy: StateFlow<Boolean> = _layerBusy.asStateFlow()
+    private val _layerBusy = MutableStateFlow<LayerBusy?>(null)
+    val layerBusy: StateFlow<LayerBusy?> = _layerBusy.asStateFlow()
+    private var layerJob: Job? = null
 
     val history = repo.observeHistory(projectId)
 
@@ -95,36 +98,66 @@ class EditorViewModel(
 
     fun clearBackgroundImage() = op { chromaRepo.clearBackground(projectId) }
 
-    /** Menambah layer dari video/gambar pilihan. Layer baru berada paling atas dan mulai di [startTick]. */
-    fun addLayer(uri: Uri, startTick: Int, fps: Int, totalTicks: Int, onAdded: (Long) -> Unit) = op {
-        _layerBusy.value = true
-        try {
-            onAdded(layerRepo.addFromUri(projectId, uri, startTick, fps, totalTicks).id)
-        } finally {
-            _layerBusy.value = false
+    // ---------------- Layer ----------------
+
+    fun addImageLayer(uri: Uri, startMs: Long, durationMs: Long, onAdded: (Long) -> Unit) {
+        if (layerJob?.isActive == true) return
+        layerJob = viewModelScope.launch {
+            _layerBusy.value = LayerBusy(null, "Menambah gambar")
+            try {
+                onAdded(layerRepo.addImage(projectId, uri, startMs, durationMs).id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("Gagal menambah layer: ${e.message}")
+            } finally {
+                _layerBusy.value = null
+            }
         }
     }
 
-    fun updateLayer(layer: LayerEntity) = op { layerRepo.update(layer) }
+    fun addVideoLayer(uri: Uri, startMs: Long, fps: Int, chromaMode: Int, onAdded: (Long) -> Unit) {
+        if (layerJob?.isActive == true) return
+        layerJob = viewModelScope.launch {
+            _layerBusy.value = LayerBusy(0f, "Memproses klip")
+            try {
+                val added = layerRepo.addVideo(projectId, uri, startMs, fps, chromaMode) {
+                    _layerBusy.value = LayerBusy(it, "Memproses klip")
+                }
+                onAdded(added.layer.id)
+                if (added.hasAudio) {
+                    _messages.tryEmit("Klip punya suara. Suara tidak ikut; tambahkan lewat Studio Audio bila perlu.")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.tryEmit("Gagal menambah klip: ${e.message}")
+            } finally {
+                _layerBusy.value = null
+            }
+        }
+    }
 
-    fun deleteLayer(layer: LayerEntity) = op { layerRepo.delete(layer) }
+    fun cancelLayerJob() {
+        layerJob?.cancel()
+    }
 
-    fun moveLayer(layerId: Long, up: Boolean) = op { layerRepo.moveZ(projectId, layerId, up) }
+    fun updateLayer(l: LayerEntity) {
+        viewModelScope.launch {
+            runCatching { layerRepo.updateProps(l) }.onFailure { _messages.tryEmit("Gagal: ${it.message}") }
+        }
+    }
 
-    fun duplicateLayer(layer: LayerEntity, onAdded: (Long) -> Unit) = op { onAdded(layerRepo.duplicate(layer).id) }
+    fun deleteLayer(l: LayerEntity) {
+        viewModelScope.launch {
+            runCatching { layerRepo.delete(l) }.onFailure { _messages.tryEmit("Gagal: ${it.message}") }
+        }
+    }
 
-    /** Menyalin suara klip video layer ke Studio Audio, dimulai pada waktu yang sama dengan layer. */
-    fun addLayerAudio(layer: LayerEntity, fps: Int) = op {
-        val f = fps.coerceAtLeast(1)
-        audioRepo.addFromClip(
-            projectId = projectId,
-            clip = File(layer.filePath),
-            name = "Suara: ${layer.name}".take(40),
-            startMs = layer.startTick * 1000L / f,
-            trimStartMs = layer.trimStartMs,
-            playMs = if (layer.loop) null else layer.lengthTicks * 1000L / f
-        )
-        _messages.tryEmit("Suara klip ditambahkan ke Audio")
+    fun moveLayer(id: Long, up: Boolean) {
+        viewModelScope.launch {
+            runCatching { layerRepo.move(projectId, id, up) }.onFailure { _messages.tryEmit("Gagal: ${it.message}") }
+        }
     }
 
     fun undo() = op { repo.undo(projectId) }

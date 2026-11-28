@@ -179,91 +179,103 @@ class BackupManifestTest {
         assertNull(BackupManifest.parse(json).frames[0].erase)
     }
 
-    // ---------- Layer overlay ----------
+    private val videoLayer = LayerEntity(
+        id = 1, projectId = 7, name = "Peluru", kind = LayerKind.VIDEO, filePath = "/x/L1/src.mp4",
+        frameDir = "/x/L1/f", frameCount = 24, frameRate = 12f, srcWidth = 640, srcHeight = 360, zOrder = 3,
+        startMs = 1500, durationMs = 2000, loopClip = true, posX = 0.25f, posY = 0.75f, scale = 0.8f,
+        rotation = 45f, opacity = 0.6f, chromaMode = 1, chromaTolerance = 0.5f, chromaSoftness = 0.2f,
+        visible = false, createdAt = 9
+    )
 
-    private fun layer(id: Long, name: String, kind: Int, z: Int, file: String) = LayerEntity(
-        id = id, projectId = 7, name = name, filePath = file, kind = kind, durationMs = if (kind == 1) 2500 else 0,
-        aspect = 1.5f, hasAudio = kind == 1, zIndex = z, startTick = 4, lengthTicks = 30, trimStartMs = if (kind == 1) 300 else 0,
-        loop = true, centerX = 0.25f, centerY = 0.75f, scale = 0.6f, rotation = -30f, opacity = 0.8f, visible = false,
-        chromaMode = 1, chromaTolerance = 0.55f, chromaSoftness = 0.2f, createdAt = 99
+    private val imageLayer = LayerEntity(
+        id = 2, projectId = 7, name = "Api", kind = LayerKind.IMAGE, filePath = "/x/L2/src.PNG",
+        frameDir = null, frameCount = 1, frameRate = 0f, srcWidth = 300, srcHeight = 300, zOrder = 4,
+        startMs = 0, durationMs = 1000, loopClip = false, createdAt = 10
     )
 
     @Test
-    fun layers_roundTrip_keepsOrderAndSettings() {
-        val layers = listOf(
-            layer(2, "Asap", 0, z = 5, file = "/x/asap.PNG"),
-            layer(1, "Peluru", 1, z = 1, file = "/x/peluru.mp4")
-        )
-        val json = BackupManifest.toJson(project, frames, tracks, layers = layers)
-        val parsed = BackupManifest.parse(json)
+    fun roundTrip_keepsVideoLayerSettings() {
+        val parsed = BackupManifest.parse(BackupManifest.toJson(project, frames, tracks, layers = listOf(videoLayer, imageLayer)))
         assertEquals(2, parsed.layers.size)
-        // urutan mengikuti zIndex (terbawah dulu), nomor urut zIndex dibuat ulang 0..n-1
-        assertEquals("layers/001.mp4", parsed.layers[0].file)
-        assertEquals("layers/002.png", parsed.layers[1].file)
-        assertEquals(listOf(0, 1), parsed.layers.map { it.layer.zIndex })
-        val l = parsed.layers[0].layer
-        assertEquals("Peluru", l.name)
-        assertEquals(1, l.kind)
-        assertEquals(2500L, l.durationMs)
-        assertEquals(1.5f, l.aspect, 0f)
-        assertTrue(l.hasAudio)
-        assertEquals(4, l.startTick)
-        assertEquals(30, l.lengthTicks)
-        assertEquals(300L, l.trimStartMs)
-        assertTrue(l.loop)
-        assertEquals(0.25f, l.centerX, 0f)
-        assertEquals(0.75f, l.centerY, 0f)
-        assertEquals(0.6f, l.scale, 0f)
-        assertEquals(-30f, l.rotation, 0f)
-        assertEquals(0.8f, l.opacity, 0f)
-        assertFalse(l.visible)
-        assertEquals(1, l.chromaMode)
-        assertEquals(0.55f, l.chromaTolerance, 0f)
-        assertEquals(0.2f, l.chromaSoftness, 0f)
-        assertEquals(99L, l.createdAt)
+        val v = parsed.layers[0]
+        assertEquals("Peluru", v.name)
+        assertEquals(LayerKind.VIDEO, v.kind)
+        assertEquals("layers/001/", v.file)
+        assertEquals(24, v.frameCount)
+        assertEquals(12f, v.frameRate, 0f)
+        assertEquals(640, v.srcWidth)
+        assertEquals(360, v.srcHeight)
+        assertEquals(3, v.zOrder)
+        assertEquals(1500L, v.startMs)
+        assertEquals(2000L, v.durationMs)
+        assertTrue(v.loopClip)
+        assertEquals(0.25f, v.posX, 0f)
+        assertEquals(0.75f, v.posY, 0f)
+        assertEquals(0.8f, v.scale, 0f)
+        assertEquals(45f, v.rotation, 0f)
+        assertEquals(0.6f, v.opacity, 0f)
+        assertEquals(1, v.chromaMode)
+        assertEquals(0.5f, v.chromaTolerance, 0f)
+        assertEquals(0.2f, v.chromaSoftness, 0f)
+        assertFalse(v.visible)
     }
 
     @Test
-    fun layers_oldBackupWithoutLayersParsesAsEmpty() {
-        val json = BackupManifest.toJson(project, frames, tracks)
-        val stripped = org.json.JSONObject(json).also { it.remove("layers") }.toString()
-        assertTrue(BackupManifest.parse(stripped).layers.isEmpty())
+    fun roundTrip_imageLayerUsesIndexBasedEntryName() {
+        val parsed = BackupManifest.parse(BackupManifest.toJson(project, frames, tracks, layers = listOf(videoLayer, imageLayer)))
+        val i = parsed.layers[1]
+        assertEquals(LayerKind.IMAGE, i.kind)
+        assertEquals("layers/002/src.png", i.file)
+        assertEquals(1, i.frameCount)
     }
 
     @Test
-    fun layers_wildValuesAreClampedOnRestore() {
-        val wild = layer(1, "x", 1, z = 0, file = "/x/a.mp4").copy(
-            scale = 99f, opacity = 5f, startTick = -3, lengthTicks = 0, chromaMode = 9, trimStartMs = 999_999
-        )
-        val parsed = BackupManifest.parse(BackupManifest.toJson(project, frames, tracks, layers = listOf(wild)))
-        val l = parsed.layers.single().layer
-        assertEquals(com.fatih.stopmotion.layers.LayerLimits.MAX_SCALE, l.scale, 0f)
+    fun parse_oldBackupWithoutLayersHasNone() {
+        val json = """{"format":"FatihStopMotion","version":1,"frames":[]}"""
+        assertTrue(BackupManifest.parse(json).layers.isEmpty())
+    }
+
+    @Test
+    fun parse_clampsBrokenLayerValues() {
+        val json = """{"format":"FatihStopMotion","version":1,"frames":[],
+            "layers":[{"kind":1,"frames":999,"scale":99,"opacity":5,"durationMs":1,"chromaMode":9}]}"""
+        val l = BackupManifest.parse(json).layers[0]
+        assertEquals("Layer", l.name)
+        assertEquals(240, l.frameCount)
+        assertEquals(4f, l.scale, 0f)
         assertEquals(1f, l.opacity, 0f)
-        assertEquals(0, l.startTick)
-        assertEquals(1, l.lengthTicks)
+        assertEquals(100L, l.durationMs)
         assertEquals(2, l.chromaMode)
-        assertEquals(2499L, l.trimStartMs)
+    }
+
+    @Test(expected = IOException::class)
+    fun parse_rejectsAbsurdLayerCount() {
+        val many = List(41) { "{}" }.joinToString(",")
+        BackupManifest.parse("""{"format":"FatihStopMotion","version":1,"frames":[],"layers":[$many]}""")
     }
 
     @Test
-    fun layers_tooManyIsRejected() {
-        val many = (1..com.fatih.stopmotion.layers.LayerLimits.MAX_LAYERS + 1).map {
-            layer(it.toLong(), "L$it", 0, z = it, file = "/x/$it.png")
-        }
-        val json = BackupManifest.toJson(project, frames, tracks, layers = many)
-        try {
-            BackupManifest.parse(json)
-            org.junit.Assert.fail("harus ditolak")
-        } catch (e: IOException) {
-            // diharapkan
-        }
+    fun layerEntryNames_areBuiltFromIndex() {
+        assertEquals("layers/003/00012.jpg", BackupManifest.layerFrameEntry(2, 12))
+        assertEquals("layers/001/", BackupManifest.layerFramesPrefix(0))
+        assertEquals("layers/001/src.png", BackupManifest.layerImageEntry(0, "/a/noext"))
+        assertEquals("layers/001/src.png", BackupManifest.layerImageEntry(0, "/a/b.verylongext"))
     }
 
     @Test
-    fun layerEntry_usesSafeExtension() {
-        assertEquals("layers/001.mp4", BackupManifest.layerEntry(0, "/a/b.MP4"))
-        assertEquals("layers/012.bin", BackupManifest.layerEntry(11, "/a/b.we!rd"))
-        assertEquals("layers/003.bin", BackupManifest.layerEntry(2, "/a/noext"))
+    fun roundTrip_keepsLayerKeyframes() {
+        val anim = "0,5000,5000,3000,0,1000,1;2000,7000,3000,5000,9000,500,0"
+        val layer = imageLayer.copy(keyframes = anim)
+        val parsed = BackupManifest.parse(BackupManifest.toJson(project, frames, tracks, layers = listOf(layer, videoLayer)))
+        assertEquals(anim, parsed.layers[0].keyframes)
+        assertNull(parsed.layers[1].keyframes)
+    }
+
+    @Test
+    fun parse_dropsBrokenKeyframes() {
+        val json = """{"format":"FatihStopMotion","version":1,"frames":[],
+            "layers":[{"kind":0,"keyframes":"garbage"}]}"""
+        assertNull(BackupManifest.parse(json).layers[0].keyframes)
     }
 }
 

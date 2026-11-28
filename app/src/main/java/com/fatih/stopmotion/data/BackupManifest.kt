@@ -1,11 +1,9 @@
 package com.fatih.stopmotion.data
 
+import com.fatih.stopmotion.fx.KeyframeCodec
 import org.json.JSONArray
 import org.json.JSONException
 import com.fatih.stopmotion.fx.EraseCodec
-import com.fatih.stopmotion.layers.LayerKind
-import com.fatih.stopmotion.layers.LayerLimits
-import com.fatih.stopmotion.layers.sanitized
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
@@ -28,8 +26,32 @@ data class AudioMeta(
     val createdAt: Long
 )
 
-/** Layer di dalam cadangan: [layer] sudah dirapikan (projectId dan filePath diisi saat dipulihkan). */
-data class LayerMeta(val file: String, val layer: LayerEntity)
+data class LayerMeta(
+    val name: String,
+    val kind: Int,
+    /** Gambar: nama entri sumber. Video: awalan folder frame ("layers/002/"). */
+    val file: String,
+    val frameCount: Int,
+    val frameRate: Float,
+    val srcWidth: Int,
+    val srcHeight: Int,
+    val zOrder: Int,
+    val startMs: Long,
+    val durationMs: Long,
+    val loopClip: Boolean,
+    val posX: Float,
+    val posY: Float,
+    val scale: Float,
+    val rotation: Float,
+    val opacity: Float,
+    val chromaMode: Int,
+    val chromaTolerance: Float,
+    val chromaSoftness: Float,
+    val visible: Boolean,
+    val createdAt: Long,
+    /** Keyframe animasi yang sudah dinormalisasi, atau null. */
+    val keyframes: String? = null
+)
 
 data class ParsedBackup(
     val project: ProjectEntity,
@@ -50,6 +72,7 @@ object BackupManifest {
     const val ENTRY = "manifest.json"
     private const val MAX_FRAMES = 20_000
     private const val MAX_TRACKS = 200
+    private const val MAX_LAYERS = 40
 
     fun frameEntry(index: Int): String = String.format(Locale.US, "frames/%05d.jpg", index + 1)
 
@@ -59,11 +82,17 @@ object BackupManifest {
         return String.format(Locale.US, "audio/%03d.%s", index + 1, ext)
     }
 
-    fun layerEntry(index: Int, source: String): String {
+    /** Sumber layer gambar. Layer video tidak menyimpan video asli, hanya frame JPEG hasil ekstraksi. */
+    fun layerImageEntry(index: Int, source: String): String {
         val ext = File(source).extension.lowercase(Locale.US)
-            .takeIf { it.length in 1..5 && it.all { c -> c.isLetterOrDigit() } } ?: "bin"
-        return String.format(Locale.US, "layers/%03d.%s", index + 1, ext)
+            .takeIf { it.length in 1..5 && it.all { c -> c.isLetterOrDigit() } } ?: "png"
+        return String.format(Locale.US, "layers/%03d/src.%s", index + 1, ext)
     }
+
+    fun layerFramesPrefix(index: Int): String = String.format(Locale.US, "layers/%03d/", index + 1)
+
+    fun layerFrameEntry(index: Int, frameNumber: Int): String =
+        String.format(Locale.US, "layers/%03d/%05d.jpg", index + 1, frameNumber)
 
     fun backgroundEntry(source: String): String {
         val ext = File(source).extension.lowercase(Locale.US)
@@ -126,30 +155,31 @@ object BackupManifest {
         }
         root.put("audio", aa)
         val la = JSONArray()
-        layers.sortedBy { it.zIndex }.forEachIndexed { i, l ->
+        layers.forEachIndexed { i, l ->
             la.put(
                 JSONObject()
-                    .put("file", layerEntry(i, l.filePath))
                     .put("name", l.name)
                     .put("kind", l.kind)
+                    .put("file", if (l.kind == LayerKind.IMAGE) layerImageEntry(i, l.filePath) else layerFramesPrefix(i))
+                    .put("frames", l.frameCount)
+                    .put("frameRate", l.frameRate.toDouble())
+                    .put("w", l.srcWidth)
+                    .put("h", l.srcHeight)
+                    .put("z", l.zOrder)
+                    .put("startMs", l.startMs)
                     .put("durationMs", l.durationMs)
-                    .put("aspect", l.aspect.toDouble())
-                    .put("hasAudio", l.hasAudio)
-                    .put("startTick", l.startTick)
-                    .put("lengthTicks", l.lengthTicks)
-                    .put("trimStartMs", l.trimStartMs)
-                    .put("loop", l.loop)
-                    .put("centerX", l.centerX.toDouble())
-                    .put("centerY", l.centerY.toDouble())
+                    .put("loop", l.loopClip)
+                    .put("x", l.posX.toDouble())
+                    .put("y", l.posY.toDouble())
                     .put("scale", l.scale.toDouble())
                     .put("rotation", l.rotation.toDouble())
                     .put("opacity", l.opacity.toDouble())
-                    .put("visible", l.visible)
                     .put("chromaMode", l.chromaMode)
                     .put("chromaTolerance", l.chromaTolerance.toDouble())
                     .put("chromaSoftness", l.chromaSoftness.toDouble())
+                    .put("visible", l.visible)
                     .put("createdAt", l.createdAt)
-                    .also { o -> l.keyframes?.let { o.put("keyframes", it) } }
+                    .also { o -> if (!l.keyframes.isNullOrEmpty()) o.put("keyframes", l.keyframes) }
             )
         }
         root.put("layers", la)
@@ -197,38 +227,34 @@ object BackupManifest {
                     createdAt = a.optLong("createdAt", 0L)
                 )
             }
-            // Layer: cadangan lama tidak punya bagian ini. Nilai dirapikan (sanitized) agar data rusak tidak ikut terbawa.
             val la = o.optJSONArray("layers") ?: JSONArray()
-            if (la.length() > LayerLimits.MAX_LAYERS) throw IOException("File cadangan tidak valid")
-            val layers = (0 until la.length()).map { idx ->
-                val l = la.getJSONObject(idx)
+            if (la.length() > MAX_LAYERS) throw IOException("File cadangan tidak valid")
+            val layers = (0 until la.length()).map {
+                val l = la.getJSONObject(it)
+                val kind = l.optInt("kind", LayerKind.IMAGE).coerceIn(0, 1)
                 LayerMeta(
-                    file = l.getString("file"),
-                    layer = LayerEntity(
-                        projectId = 0L,
-                        name = ProjectNames.clean(l.optString("name", "Layer")).ifEmpty { "Layer" },
-                        filePath = "",
-                        kind = l.optInt("kind", LayerKind.IMAGE),
-                        durationMs = l.optLong("durationMs", 0L),
-                        aspect = l.optDouble("aspect", 1.0).toFloat(),
-                        hasAudio = l.optBoolean("hasAudio", false),
-                        zIndex = idx,
-                        startTick = l.optInt("startTick", 0),
-                        lengthTicks = l.optInt("lengthTicks", 1),
-                        trimStartMs = l.optLong("trimStartMs", 0L),
-                        loop = l.optBoolean("loop", false),
-                        centerX = l.optDouble("centerX", 0.5).toFloat(),
-                        centerY = l.optDouble("centerY", 0.5).toFloat(),
-                        scale = l.optDouble("scale", 1.0).toFloat(),
-                        rotation = l.optDouble("rotation", 0.0).toFloat(),
-                        opacity = l.optDouble("opacity", 1.0).toFloat(),
-                        visible = l.optBoolean("visible", true),
-                        chromaMode = l.optInt("chromaMode", 0),
-                        chromaTolerance = l.optDouble("chromaTolerance", 0.4).toFloat(),
-                        chromaSoftness = l.optDouble("chromaSoftness", 0.3).toFloat(),
-                        createdAt = l.optLong("createdAt", 0L),
-                        keyframes = l.optString("keyframes", "").ifEmpty { null }
-                    ).sanitized()
+                    name = ProjectNames.clean(l.optString("name", "Layer")).ifEmpty { "Layer" },
+                    kind = kind,
+                    file = l.optString("file", ""),
+                    frameCount = if (kind == LayerKind.VIDEO) l.optInt("frames", 1).coerceIn(1, 240) else 1,
+                    frameRate = l.optDouble("frameRate", 0.0).toFloat().coerceIn(0f, 60f),
+                    srcWidth = l.optInt("w", 1).coerceIn(1, 16384),
+                    srcHeight = l.optInt("h", 1).coerceIn(1, 16384),
+                    zOrder = l.optInt("z", it).coerceIn(0, 10_000),
+                    startMs = l.optLong("startMs", 0L).coerceAtLeast(0L),
+                    durationMs = l.optLong("durationMs", 1000L).coerceAtLeast(100L),
+                    loopClip = l.optBoolean("loop", false),
+                    posX = l.optDouble("x", 0.5).toFloat().coerceIn(-0.5f, 1.5f),
+                    posY = l.optDouble("y", 0.5).toFloat().coerceIn(-0.5f, 1.5f),
+                    scale = l.optDouble("scale", 0.5).toFloat().coerceIn(0.03f, 4f),
+                    rotation = l.optDouble("rotation", 0.0).toFloat().coerceIn(-360f, 360f),
+                    opacity = l.optDouble("opacity", 1.0).toFloat().coerceIn(0f, 1f),
+                    chromaMode = l.optInt("chromaMode", 0).coerceIn(0, 2),
+                    chromaTolerance = l.optDouble("chromaTolerance", 0.4).toFloat().coerceIn(0f, 1f),
+                    chromaSoftness = l.optDouble("chromaSoftness", 0.3).toFloat().coerceIn(0f, 1f),
+                    visible = l.optBoolean("visible", true),
+                    createdAt = l.optLong("createdAt", 0L),
+                    keyframes = KeyframeCodec.encode(KeyframeCodec.decode(l.optString("keyframes", "")))
                 )
             }
             val project = ProjectEntity(

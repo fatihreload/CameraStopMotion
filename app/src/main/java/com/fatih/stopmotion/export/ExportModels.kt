@@ -11,23 +11,16 @@ import android.graphics.RectF
 import android.graphics.Shader
 import com.fatih.stopmotion.data.FrameEntity
 import com.fatih.stopmotion.data.LayerEntity
+import com.fatih.stopmotion.fx.LayerFiles
+import com.fatih.stopmotion.fx.KeyframeMath
+import com.fatih.stopmotion.fx.LayerGeometry
+import com.fatih.stopmotion.fx.LayerTiming
 import com.fatih.stopmotion.fx.ChromaBg
 import com.fatih.stopmotion.fx.ChromaKey
 import com.fatih.stopmotion.fx.ChromaState
 import com.fatih.stopmotion.fx.EraseCodec
 import com.fatih.stopmotion.fx.FxState
 import com.fatih.stopmotion.fx.ImageFx
-import com.fatih.stopmotion.layers.Keyframes
-import com.fatih.stopmotion.layers.LayerGeometry
-import com.fatih.stopmotion.layers.LayerSource
-import com.fatih.stopmotion.layers.LayerTiming
-import com.fatih.stopmotion.layers.chromaState
-import com.fatih.stopmotion.layers.Pose
-import com.fatih.stopmotion.layers.basePose
-import com.fatih.stopmotion.layers.isVideo
-import com.fatih.stopmotion.layers.keys
-import com.fatih.stopmotion.layers.timing
-import java.io.File
 import java.io.IOException
 import kotlin.math.hypot
 import kotlin.math.min
@@ -97,10 +90,8 @@ fun videoBitrate(w: Int, h: Int, fps: Int, quality: Int): Int {
 }
 
 /**
- * Menggambar satu tick film (foto + layer overlay + filter + vignette + fade) ke satu Bitmap yang dipakai ulang.
+ * Menggambar satu tick film (foto + filter + vignette + fade) ke satu Bitmap yang dipakai ulang.
  * Rumusnya sama dengan pratinjau di Studio Animasi, jadi hasil ekspor sama dengan yang terlihat.
- * [layers] digambar di atas foto dari yang terbawah ke teratas; video layer diambil frame demi frame
- * menurut waktu film ([fps]) lalu di-chroma-key bila diatur.
  */
 class FrameComposer(
     private val frames: List<FrameEntity>,
@@ -108,38 +99,11 @@ class FrameComposer(
     val width: Int,
     val height: Int,
     private val chroma: ChromaState = ChromaState(),
+    /** Layer tambahan (gambar/klip) yang digambar di atas foto, berurutan dari bawah ke atas. */
     layers: List<LayerEntity> = emptyList(),
+    /** FPS proyek, untuk mengubah nomor tick menjadi waktu film (ms) bagi layer. */
     private val fps: Int = 12
 ) {
-    /** Satu layer beserta sumber pikselnya. Gambar diam di-cache (di-key sekali saja), video diambil per tick. */
-    private class LayerRuntime(
-        val layer: LayerEntity,
-        val source: LayerSource,
-        val maxSide: Int,
-        val keys: List<com.fatih.stopmotion.layers.Keyframe>,
-        val base: Pose
-    ) {
-        var still: Bitmap? = null
-
-        /** Pose layer pada tick film [tick]: dari keyframe bila dianimasikan, selain itu pose statis. */
-        fun pose(tick: Int): Pose =
-            if (keys.isEmpty()) base else Keyframes.sample(keys, tick - layer.startTick, base)
-    }
-
-    private val layerRuntimes: List<LayerRuntime> = layers
-        .filter { it.visible && File(it.filePath).exists() }
-        .sortedBy { it.zIndex }
-        .map { l ->
-            val keys = l.keys
-            // Bitmap cukup tajam untuk ukuran terbesar yang pernah dicapai animasi.
-            val biggest = keys.maxOfOrNull { it.pose.scale }?.let { maxOf(it, l.scale) } ?: l.scale
-            LayerRuntime(
-                l, LayerSource(l.filePath, l.isVideo),
-                LayerGeometry.neededLongSide(biggest, l.aspect, width),
-                keys, l.basePose()
-            )
-        }
-
     private val tickToFrame: IntArray = run {
         val out = ArrayList<Int>()
         frames.forEachIndexed { i, f -> repeat(f.holdCount.coerceAtLeast(1)) { out.add(i) } }
@@ -166,9 +130,12 @@ class FrameComposer(
         }
     }
     private val fadePaint = Paint()
+
+    private val activeLayers: List<LayerEntity> = layers.filter { it.visible && it.durationMs > 0 }.sortedBy { it.zOrder }
+    private val layerPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private class CachedLayer(val key: String, val bitmap: Bitmap)
+    private val layerCache = HashMap<Long, CachedLayer>()
     private val photoBgPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    // Layer memakai filter warna film yang sama dengan foto (seperti di pratinjau).
-    private val layerPaint = Paint(Paint.FILTER_BITMAP_FLAG).apply { colorFilter = photoPaint.colorFilter }
 
     // Latar pengganti dipakai bila ada bagian yang dihapus (chroma key aktif atau ada coretan erase);
     // selain itu latar hitam seperti biasa.
@@ -183,30 +150,6 @@ class FrameComposer(
 
     fun frameAt(tick: Int): Int = tickToFrame[tick]
 
-    /**
-     * Kunci isi tick: frame foto + keadaan semua layer (waktu di dalam media, atau tidak tampil).
-     * Dua tick berurutan dengan kunci sama dan tanpa fade menghasilkan gambar yang identik, jadi eksportir
-     * boleh memakai ulang hasil gambar sebelumnya.
-     */
-    fun contentKey(tick: Int): Long {
-        val frame = tickToFrame[tick].toLong()
-        if (layerRuntimes.isEmpty()) return frame
-        val ids = LongArray(layerRuntimes.size)
-        val times = LongArray(layerRuntimes.size)
-        for (i in layerRuntimes.indices) {
-            val l = layerRuntimes[i].layer
-            ids[i] = l.id
-            times[i] = LayerTiming.sourceTimeMs(l.timing(), tick, fps) ?: -1L
-        }
-        var key = LayerTiming.signature(ids, times) * 31L + frame
-        // Layer beranimasi: pose yang berbeda berarti gambar berbeda walau waktu media sama.
-        for (i in layerRuntimes.indices) {
-            val r = layerRuntimes[i]
-            if (r.keys.isNotEmpty() && times[i] >= 0L) key = key * 31L + r.pose(tick).hashCode()
-        }
-        return key
-    }
-
     fun fadeAlpha(tick: Int): Float {
         var a = 0f
         val n = totalTicks
@@ -218,6 +161,54 @@ class FrameComposer(
 
     /** Tick tanpa fade: isinya identik dengan tick lain dari frame yang sama. */
     fun isStatic(tick: Int): Boolean = fadeAlpha(tick) <= 0f
+
+    /**
+     * Isi sebuah tick dalam bentuk yang bisa dibandingkan: frame foto, tingkat fade, dan frame tiap layer.
+     * Dua tick berurutan dengan tanda yang sama menghasilkan gambar identik, jadi tidak perlu digambar/diencode ulang.
+     */
+    fun signature(tick: Int): List<Int> {
+        val t = LayerTiming.tickMs(tick, fps)
+        val sig = ArrayList<Int>(2 + activeLayers.size)
+        sig.add(tickToFrame[tick])
+        sig.add((fadeAlpha(tick) * 255).toInt())
+        for (l in activeLayers) {
+            sig.add(LayerTiming.frameIndex(l, t) ?: -1)
+            if (KeyframeMath.hasKeyframes(l)) sig.add(KeyframeMath.signature(l, t))
+        }
+        return sig
+    }
+
+    /** Bitmap satu frame layer (sudah dihapus latarnya bila layer memakai chroma key). Disimpan satu per layer. */
+    private fun layerBitmap(l: LayerEntity, index: Int): Bitmap? {
+        val path = LayerFiles.framePath(l, index) ?: return null
+        val key = "$path|${l.chromaMode}|${(l.chromaTolerance * 100).roundToInt()}|${(l.chromaSoftness * 100).roundToInt()}"
+        layerCache[l.id]?.let { if (it.key == key) return it.bitmap }
+        layerCache.remove(l.id)?.bitmap?.recycle()
+        val raw = ImageFx.decode(path, maxOf(width, height)) ?: return null
+        val result = if (l.chromaMode != 0) {
+            ChromaKey.process(raw, ChromaState(l.chromaMode, l.chromaTolerance, l.chromaSoftness), emptyList())
+                .also { raw.recycle() }
+        } else raw
+        layerCache[l.id] = CachedLayer(key, result)
+        return result
+    }
+
+    private fun drawLayers(tick: Int) {
+        if (activeLayers.isEmpty()) return
+        val tMs = LayerTiming.tickMs(tick, fps)
+        for (l in activeLayers) {
+            val index = LayerTiming.frameIndex(l, tMs) ?: continue
+            val bmp = layerBitmap(l, index) ?: continue
+            val tf = KeyframeMath.sample(l, tMs)
+            val r = LayerGeometry.rect(l, tf, width.toFloat(), height.toFloat())
+            layerPaint.alpha = (tf.opacity.coerceIn(0f, 1f) * 255).toInt()
+            canvas.save()
+            canvas.translate(r.cx, r.cy)
+            canvas.rotate(r.rotation)
+            canvas.drawBitmap(bmp, null, RectF(-r.w / 2f, -r.h / 2f, r.w / 2f, r.h / 2f), layerPaint)
+            canvas.restore()
+        }
+    }
 
     private fun load(frame: FrameEntity): Bitmap {
         val cacheId = frame.filePath + "|" + (frame.eraseData?.hashCode() ?: 0)
@@ -242,29 +233,6 @@ class FrameComposer(
         cachedPath = cacheId
         cachedBitmap = result
         return result
-    }
-
-    /** Menggambar layer overlay yang tampil pada tick ini, dari layer terbawah ke teratas. */
-    private fun drawLayers(tick: Int) {
-        for (r in layerRuntimes) {
-            val l = r.layer
-            val t = LayerTiming.sourceTimeMs(l.timing(), tick, fps) ?: continue
-            val bmp = (
-                if (l.isVideo) r.source.render(t, r.maxSide, l.chromaState())
-                else r.still ?: r.source.render(0L, r.maxSide, l.chromaState())?.also { r.still = it }
-            ) ?: continue
-            val pose = r.pose(tick)
-            val dw = LayerGeometry.width(pose.scale, width.toFloat())
-            val dh = dw * bmp.height / bmp.width
-            val cx = pose.x * width
-            val cy = pose.y * height
-            layerPaint.alpha = (pose.opacity.coerceIn(0f, 1f) * 255).toInt()
-            canvas.save()
-            canvas.rotate(pose.rotation, cx, cy)
-            canvas.drawBitmap(bmp, null, RectF(cx - dw / 2f, cy - dh / 2f, cx + dw / 2f, cy + dh / 2f), layerPaint)
-            canvas.restore()
-            if (l.isVideo) bmp.recycle() // frame video milik pemanggil; gambar diam dipakai ulang
-        }
     }
 
     /** Hasil dipakai ulang di pemanggilan berikutnya: salin/konversi sebelum memanggil render lagi. */
@@ -297,15 +265,12 @@ class FrameComposer(
     }
 
     fun release() {
-        for (r in layerRuntimes) {
-            r.source.close()
-            r.still?.recycle()
-            r.still = null
-        }
         cachedBitmap?.recycle()
         cachedBitmap = null
         cachedPath = null
         bgBitmap?.recycle()
+        layerCache.values.forEach { it.bitmap.recycle() }
+        layerCache.clear()
         bitmap.recycle()
     }
 }

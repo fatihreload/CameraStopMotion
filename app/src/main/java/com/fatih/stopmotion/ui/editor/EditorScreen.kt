@@ -31,7 +31,6 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -44,9 +43,14 @@ import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Button
+import com.fatih.stopmotion.data.LayerEntity
+import com.fatih.stopmotion.fx.LayerTiming
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -61,11 +65,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -93,16 +94,12 @@ import com.fatih.stopmotion.AppContainer
 import com.fatih.stopmotion.audio.AudioEngine
 import com.fatih.stopmotion.data.FrameBitmapCache
 import com.fatih.stopmotion.data.KeyedBitmapCache
-import com.fatih.stopmotion.data.LayerEntity
 import com.fatih.stopmotion.fx.ChromaBg
 import com.fatih.stopmotion.fx.ChromaKey
 import com.fatih.stopmotion.fx.EraseCodec
 import com.fatih.stopmotion.fx.ChromaState
 import com.fatih.stopmotion.fx.FxState
 import com.fatih.stopmotion.fx.ImageFx
-import com.fatih.stopmotion.layers.posedAt
-import com.fatih.stopmotion.layers.sanitized
-import com.fatih.stopmotion.layers.withEdit
 import com.fatih.stopmotion.ui.theme.FatihColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -230,72 +227,39 @@ fun EditorScreen(
 
     val listState = rememberLazyListState()
 
-    // ---- Layer overlay: video/gambar (mis. efek peluru berlatar green screen) di atas foto ----
-    // Layer 1 = foto frame; layer yang ditambahkan menjadi layer 2, 3, dst.
-    val storedLayers by vm.layers.collectAsStateWithLifecycle()
-    val layerBusy by vm.layerBusy.collectAsStateWithLifecycle()
-    // Perubahan yang sedang digeser/dipilih tampil langsung (draft) dan disimpan saat jari dilepas.
-    val layerDrafts = remember { mutableStateMapOf<Long, LayerEntity>() }
-    val committedDrafts = remember { HashSet<Long>() }
-    LaunchedEffect(storedLayers) {
-        val byId = storedLayers.associateBy { it.id }
-        for (id in layerDrafts.keys.toList()) {
-            val stored = byId[id]
-            // Draft dibuang bila layernya hilang, sudah tersimpan, atau sudah dikirim ke database
-            // (supaya draft lama tidak menimpa perubahan lain, mis. urutan tumpukan).
-            if (stored == null || stored == layerDrafts[id] || id in committedDrafts) {
-                layerDrafts.remove(id)
-                committedDrafts.remove(id)
-            }
-        }
-    }
-    val layers = storedLayers.map { layerDrafts[it.id] ?: it }
-    var showLayers by remember { mutableStateOf(false) }
-    var selectedLayerId by remember { mutableLongStateOf(-1L) }
-    var layerTab by remember { mutableIntStateOf(LayerTab.TIME) }
-    val overlayScope = rememberCoroutineScope()
-    val overlayEngine = remember { OverlayPreviewEngine(overlayScope) }
-    DisposableEffect(Unit) { onDispose { overlayEngine.close() } }
-    LaunchedEffect(layers, safeTick, playing, fps, n) {
-        overlayEngine.ensure(layers, safeTick, fps, if (playing) 8 else 0, (n - 1).coerceAtLeast(0))
-    }
-    // Layer beranimasi (keyframe): pratinjau, gestur, dan slider bekerja pada pose di tick saat ini.
-    val posedLayers = layers.map { it.posedAt(safeTick) }
-    // Edit dari UI (salinan berpose) -> layer yang disimpan. Pada layer beranimasi, mengubah posisi/ukuran/
-    // putar/transparan otomatis menjadi keyframe di tick ini; layer biasa diterima apa adanya.
-    val resolveEdit: (LayerEntity) -> LayerEntity = { edited ->
-        (layers.firstOrNull { it.id == edited.id } ?: edited).withEdit(edited.sanitized(), safeTick).sanitized()
-    }
-    val commitLayer: (LayerEntity) -> Unit = { l ->
-        val clean = l.sanitized()
-        layerDrafts[l.id] = clean
-        committedDrafts.add(l.id)
-        vm.updateLayer(clean)
-    }
-    val onLayerAdded: (Long) -> Unit = { id ->
-        selectedLayerId = id
-        layerTab = LayerTab.TIME
-    }
-    val pickLayerVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) vm.addLayer(uri, safeTick, fps, n, onLayerAdded)
-    }
-    val pickLayerImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) vm.addLayer(uri, safeTick, fps, n, onLayerAdded)
-    }
-
-    // Rasio pratinjau = rasio foto pertama, sama dengan hasil ekspor, supaya posisi layer di pratinjau
-    // jatuh di tempat yang sama pada video hasil.
-    val firstPhotoPath = frames.firstOrNull()?.filePath
-    val photoAspect by produceState(initialValue = 3f / 4f, firstPhotoPath) {
-        val size = firstPhotoPath?.let { withContext(Dispatchers.IO) { ImageFx.bounds(it) } }
-        value = if (size != null) size.first / size.second.toFloat() else 3f / 4f
-    }
-
     // ---- Audio: track diputar mengikuti posisi timeline (tick / fps) ----
     val engine = remember { AudioEngine() }
     DisposableEffect(Unit) { onDispose { engine.release() } }
     LaunchedEffect(audioTracks) { withContext(Dispatchers.IO) { engine.setTracks(audioTracks) } }
     val timeMsNow by rememberUpdatedState((safeTick * 1000L) / fps.coerceAtLeast(1))
+
+    // ---- Layer tambahan (gambar/klip video di atas foto) ----
+    val layers by vm.layers.collectAsStateWithLifecycle()
+    val layerBusy by vm.layerBusy.collectAsStateWithLifecycle()
+    var showLayers by remember { mutableStateOf(false) }
+    var showAddLayer by remember { mutableStateOf(false) }
+    var selectedLayerId by remember { mutableStateOf<Long?>(null) }
+    var liveLayer by remember { mutableStateOf<LayerEntity?>(null) }
+    var layerDragging by remember { mutableStateOf(false) }
+    var pendingVideoChroma by remember { mutableIntStateOf(0) }
+    val layerCache = remember { KeyedBitmapCache() }
+    DisposableEffect(Unit) { onDispose { layerCache.clear() } }
+    // Nilai "live" (saat slider/gesture berjalan) dibuang setelah database mengirim nilai tersimpan.
+    LaunchedEffect(layers) { if (!layerDragging) liveLayer = null }
+    LaunchedEffect(layers) {
+        if (layers.none { it.id == selectedLayerId }) selectedLayerId = layers.lastOrNull()?.id
+    }
+    val shownLayers = run {
+        val live = liveLayer
+        if (live == null) layers else layers.map { if (it.id == live.id) live else it }
+    }
+    val selectedLayer = shownLayers.firstOrNull { it.id == selectedLayerId }
+    val pickLayerImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.addImageLayer(uri, timeMsNow, 2000L) { selectedLayerId = it }
+    }
+    val pickLayerVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.addVideoLayer(uri, timeMsNow, fps, pendingVideoChroma) { selectedLayerId = it }
+    }
     LaunchedEffect(playing, speed, audioTracks) {
         if (!playing) {
             engine.update(timeMsNow, false, speed)
@@ -405,7 +369,7 @@ fun EditorScreen(
             } else {
                 Box(
                     Modifier
-                        .aspectRatio(photoAspect)
+                        .aspectRatio(3f / 4f)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color.Black)
                 ) {
@@ -418,14 +382,20 @@ fun EditorScreen(
                     } else {
                         FramePreview(currentFrame?.filePath, cache, Modifier.fillMaxSize(), fxFilter)
                     }
-                    if (layers.isNotEmpty()) {
-                        OverlayLayersView(
-                            layers = posedLayers,
-                            tick = safeTick,
-                            fps = fps,
-                            engine = overlayEngine,
-                            colorFilter = fxFilter,
-                            selectedId = if (showLayers) selectedLayerId else -1L,
+                    LayerPreview(
+                        layers = shownLayers,
+                        timeMs = timeMsNow,
+                        selectedId = if (showLayers) selectedLayerId else null,
+                        cache = layerCache,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    if (showLayers && selectedLayer != null) {
+                        LayerGestureOverlay(
+                            layer = selectedLayer,
+                            timeMs = timeMsNow,
+                            onChange = { liveLayer = it },
+                            onDragging = { layerDragging = it },
+                            onCommit = { vm.updateLayer(it) },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -458,16 +428,6 @@ fun EditorScreen(
                                 (if (fx.fadeWhite) Color.White else Color.Black).copy(alpha = fadeAlpha)
                             )
                         )
-                    }
-                    if (showLayers) {
-                        posedLayers.firstOrNull { it.id == selectedLayerId }?.let { sel ->
-                            LayerGestureLayer(
-                                layer = sel,
-                                onChange = { layerDrafts[it.id] = resolveEdit(it) },
-                                onCommit = { commitLayer(resolveEdit(it)) },
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
                     }
                     if (showChroma) {
                         ChromaPanel(
@@ -569,16 +529,7 @@ fun EditorScreen(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            TextButton(onClick = { showLayers = !showLayers }, contentPadding = ToolPadding) {
-                Icon(
-                    Icons.Filled.Layers,
-                    contentDescription = null,
-                    tint = if (showLayers || layers.isNotEmpty()) FatihColors.Purple else Color.White
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(if (layers.isEmpty()) "Layer" else "Layer (${layers.size + 1})")
-            }
-            TextButton(onClick = { showChroma = !showChroma }, contentPadding = ToolPadding) {
+            TextButton(onClick = { showChroma = !showChroma; if (showChroma) showLayers = false }, contentPadding = ToolPadding) {
                 Icon(
                     Icons.Filled.Wallpaper,
                     contentDescription = null,
@@ -586,6 +537,18 @@ fun EditorScreen(
                 )
                 Spacer(Modifier.width(4.dp))
                 Text("Chroma")
+            }
+            TextButton(
+                onClick = { showLayers = !showLayers; if (showLayers) showChroma = false },
+                contentPadding = ToolPadding
+            ) {
+                Icon(
+                    Icons.Filled.Layers,
+                    contentDescription = null,
+                    tint = if (showLayers || layers.isNotEmpty()) FatihColors.Purple else Color.White
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(if (layers.isEmpty()) "Layer" else "Layer (${layers.size})")
             }
             TextButton(onClick = { showFx = true }, contentPadding = ToolPadding) {
                 Icon(Icons.Filled.AutoFixHigh, contentDescription = null, tint = if (fx.isDefault) Color.White else FatihColors.Purple)
@@ -621,38 +584,39 @@ fun EditorScreen(
             }
         }
 
+        // ---------- FPS & kecepatan (diganti panel layer saat panel layer terbuka) ----------
         if (showLayers) {
-            if (layerBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            LayersPanel(
-                layers = posedLayers,
+            LayerPanel(
+                layers = shownLayers,
                 selectedId = selectedLayerId,
-                tab = layerTab,
-                onTab = { layerTab = it },
-                totalTicks = n,
-                currentTick = safeTick,
-                fps = fps,
-                onSelect = { selectedLayerId = it },
-                onAddVideo = { pickLayerVideo.launch(arrayOf("video/*")) },
-                onAddImage = { pickLayerImage.launch(arrayOf("image/*")) },
-                onChange = { layerDrafts[it.id] = resolveEdit(it) },
-                onCommit = { commitLayer(resolveEdit(it)) },
-                onEditEnd = { id -> layerDrafts[id]?.let(commitLayer) },
-                onSeek = { target ->
-                    playing = false
-                    tick = target.coerceIn(0, (n - 1).coerceAtLeast(0))
+                busy = layerBusy,
+                filmMs = LayerTiming.filmMs(n, fps),
+                currentMs = timeMsNow,
+                onSeek = { ms ->
+                    if (n > 0) {
+                        playing = false
+                        tick = ((ms * fps) / 1000).toInt().coerceIn(0, n - 1)
+                    }
                 },
+                onSelect = { id ->
+                    selectedLayerId = id
+                    // Bila layer tidak tampil di posisi sekarang, lompat ke awalnya agar bisa diatur di pratinjau.
+                    layers.firstOrNull { it.id == id }?.let { l ->
+                        if (LayerTiming.frameIndex(l, timeMsNow) == null && n > 0) {
+                            playing = false
+                            tick = ((l.startMs * fps) / 1000).toInt().coerceIn(0, n - 1)
+                        }
+                    }
+                },
+                onChange = { liveLayer = it },
+                onCommit = { liveLayer?.let { vm.updateLayer(it) } },
+                onAdd = { showAddLayer = true },
+                onDelete = { vm.deleteLayer(it) },
                 onMove = { id, up -> vm.moveLayer(id, up) },
-                onDuplicate = { l -> vm.duplicateLayer(l) { selectedLayerId = it } },
-                onDelete = { l ->
-                    layerDrafts.remove(l.id)
-                    selectedLayerId = layers.lastOrNull { it.id != l.id }?.id ?: -1L
-                    vm.deleteLayer(l)
-                },
-                onAddAudio = { l -> vm.addLayerAudio(l, fps) },
+                onCancelBusy = { vm.cancelLayerJob() },
                 onClose = { showLayers = false }
             )
         } else {
-        // ---------- FPS & kecepatan ----------
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("FPS $fps", fontSize = 12.sp, modifier = Modifier.width(84.dp))
             Slider(
@@ -676,6 +640,7 @@ fun EditorScreen(
                 valueRange = 0.25f..2f,
                 modifier = Modifier.height(28.dp)
             )
+        }
         }
 
         // ---------- Timeline ----------
@@ -727,7 +692,47 @@ fun EditorScreen(
             }
             Spacer(Modifier.height(8.dp))
         }
-        }
+    }
+
+    if (showAddLayer) {
+        AlertDialog(
+            onDismissRequest = { showAddLayer = false },
+            title = { Text("Tambah layer") },
+            text = {
+                Column {
+                    Text(
+                        "Layer tampil di atas foto pada waktu yang Anda atur. Mulai dari posisi film sekarang.",
+                        fontSize = 12.sp
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Button(
+                        onClick = { showAddLayer = false; pickLayerImage.launch(arrayOf("image/*")) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Gambar atau PNG transparan") }
+                    Spacer(Modifier.height(14.dp))
+                    Text("Klip video (mis. efek peluru berlatar hijau)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        MiniChip("Tanpa chroma", null, pendingVideoChroma == 0) { pendingVideoChroma = 0 }
+                        MiniChip("Hijau", Color(0xFF1DB954), pendingVideoChroma == 1) { pendingVideoChroma = 1 }
+                        MiniChip("Biru", Color(0xFF2F6FED), pendingVideoChroma == 2) { pendingVideoChroma = 2 }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = { showAddLayer = false; pickLayerVideo.launch(arrayOf("video/*")) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Pilih klip video") }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Klip diubah menjadi frame pada FPS proyek (maks. 240 frame). Suara klip tidak ikut.",
+                        fontSize = 11.sp,
+                        color = FatihColors.TextSecondary
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showAddLayer = false }) { Text("Tutup") } }
+        )
     }
 
     if (showFx) {

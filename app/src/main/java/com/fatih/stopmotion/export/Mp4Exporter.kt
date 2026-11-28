@@ -136,21 +136,18 @@ object Mp4Exporter {
             val yPlane = ByteArray(w * h)
             val uPlane = ByteArray(w * h / 4)
             val vPlane = ByteArray(w * h / 4)
-            var lastKey = -1L
-            var lastWasStatic = false
+            var lastSig: List<Int>? = null
             val total = composer.totalTicks
 
             for (tick in 0 until total) {
                 if (cancelled()) throw CancellationException("Dibatalkan")
-                val static = composer.isStatic(tick)
-                // Kunci isi = frame foto + keadaan semua layer: tick identik tidak digambar ulang.
-                val key = composer.contentKey(tick)
-                if (!(static && lastWasStatic && key == lastKey)) {
+                // Gambar dan konversi YUV hanya bila isi tick berbeda dari tick sebelumnya.
+                val sig = composer.signature(tick)
+                if (sig != lastSig) {
                     val bmp = composer.render(tick)
                     toYuv(bmp, argb, yPlane, uPlane, vPlane)
                 }
-                lastKey = key
-                lastWasStatic = static
+                lastSig = sig
 
                 var inIdx = -1
                 var spins = 0

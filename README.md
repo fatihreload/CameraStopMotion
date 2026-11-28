@@ -234,62 +234,48 @@ frame animasi seperti biasa -> di Erase, coret hanya tangan -> Simpan. Pilih **S
 - **Kamera:** ikon kualitas tidak lagi selalu "HQ". Sekarang berupa lencana yang menampilkan pilihan saat ini:
   SD, HD, HD+, 2K, 4K, atau MAX.
 
+## v0.9.0 (Layer dan Klip)
+- Tombol **Layer** di baris alat Studio Animasi membuka panel layer di bawah pratinjau. **+ Layer** menambah:
+  - **Gambar** (PNG transparan didukung), atau
+  - **Klip video**, dengan opsi *Tanpa chroma / Hijau / Biru* saat menambah. Cocok untuk efek berlatar green screen,
+    misalnya peluru pada stop motion tembakan.
+- **Banyak layer** (sampai 20 per proyek). Urutan tumpukan bisa dinaikkan/diturunkan; layer lain di atas foto, di bawah
+  vignette dan fade.
+- Per layer: **Waktu** (mulai, lama, "Mulai di sini", ulangi klip), **Tampilan** (ukuran, putar, opasitas, tengah),
+  **Chroma** (Mati/Hijau/Biru, toleransi, tepi halus, memakai pipeline chroma key yang sama dengan foto), dan **Atur**
+  (urutan, sembunyikan, hapus).
+- Atur langsung di pratinjau: **geser** untuk memindah, **cubit** untuk ukuran, **putar dua jari** untuk memutar.
+- Klip diekstrak sekali menjadi urutan JPEG (fps proyek, maksimal 30 fps dan 240 frame), jadi pratinjau dan ekspor tidak
+  bergantung pada decoder video. Klip yang lebih panjang dipotong. Suara klip tidak ikut; tambahkan lewat Studio Audio.
+- Ikut dalam **ekspor MP4 dan GIF** (rumus waktu dan posisi sama dengan pratinjau), **cadangan/impor**, dan **duplikat**
+  proyek. Database naik ke versi 7 (migrasi 6 ke 7).
+- Tes baru: waktu dan geometri layer, nama berkas, dan cadangan yang membawa layer (termasuk data rusak).
 
-## Tahap 9 (v0.9.0) — Layer video/gambar dan chroma key per layer
+## v0.10.0 (keyframe layer dan kamera manual)
 
-Foto frame adalah **layer 1**. Video atau gambar yang Anda tambahkan menjadi **layer 2, 3, dst.** (makin besar nomornya,
-makin di atas). Jumlah layer maksimal 50 per proyek.
+### Keyframe pada layer
+- Panel Layer punya tab **Animasi**. Geser playhead ke waktu yang diinginkan, atur layer di pratinjau (geser, cubit,
+  putar) atau lewat tab Tampilan, lalu ketuk **Mulai animasi di sini** / **+ Keyframe di sini**. Setelah layer punya
+  keyframe, setiap perubahan pada waktu tertentu otomatis membuat atau memperbarui keyframe di waktu itu.
+- Yang dianimasikan: posisi, ukuran, putaran, dan opasitas. Gerak ke keyframe berikutnya bisa **Lurus**, **Halus**
+  (mulai dan berhenti perlahan), atau **Tahan** (tetap lalu melompat).
+- **Hapus keyframe** menghapus satu titik (keyframe terakhir menjadi pose statis). **Hapus animasi** membekukan layer
+  di pose saat ini.
+- Pratinjau, ekspor MP4/GIF, cadangan, impor, dan duplikat proyek memakai rumus interpolasi yang sama. Maksimal 60
+  keyframe per layer.
 
-### Contoh: stop motion tembakan
-1. Ambil foto frame seperti biasa (karakter menembak).
-2. Studio Animasi > tombol **Layer** > **+ Video**, pilih klip efek peluru/ledakan yang berlatar hijau.
-3. Geser slider seek ke frame saat peluru harus keluar, ketuk **Mulai di posisi ini** (tab *Waktu*).
-4. Tab **Chroma** > pilih **Hijau** (atau **Biru**), atur *Toleransi* dan *Tepi halus* sampai latar hilang.
-5. Di pratinjau: **geser** dengan satu jari untuk memindah, **cubit** untuk ukuran, **putar** dengan dua jari.
-6. Ulangi **+ Video** / **+ Gambar** untuk efek lain (asap, kilatan, stiker PNG). Setiap layer punya waktu sendiri.
-7. Ekspor MP4 atau GIF: semua layer ikut digambar.
-
-### Pengaturan per layer
+### Kamera manual (tombol Tune di bilah atas kamera)
 | Tab | Isi |
 |---|---|
-| **Waktu** | Mulai, Durasi, Potong awal (video), Ulang (loop). Tanpa *Ulang*, klip **hilang** setelah selesai diputar (peluru tidak membeku di frame terakhir). Batang ungu menunjukkan posisi klip di timeline film. |
-| **Tampilan** | Ukuran, Transparan, Putar, tombol *Tengah* dan *Pas layar*. |
-| **Chroma** | Mati / Hijau / Biru, Toleransi, Tepi halus. Bagian yang dihapus menjadi transparan sehingga foto di bawahnya terlihat. |
+| Fokus | **Auto Focus**, **Manual Focus** (slider dekat sampai jauh), **Lock Focus & Exposure**, **Lock Focus + Manual Exposure** |
+| AW | Auto, Locked, Incandescent, Fluorescent, Daylight, Cloudy, Twilight, Shade |
+| EV | Kompensasi eksposur sesuai langkah kamera |
+| Zoom | 1.0x sampai 10.0x (dibatasi kemampuan kamera) |
+| Shutter | 1/4000 sampai 1/4 detik, aktif pada Lock Focus + Manual Exposure |
+| ISO | 50 sampai 3200 (dibatasi kamera), aktif pada Lock Focus + Manual Exposure |
+- Lock Focus & Exposure mengunci fokus dan eksposur dari tengah bingkai (dan AW) agar kecerahan tidak kedip antar frame.
+- Opsi yang tidak didukung kamera ditampilkan redup atau diganti otomatis (mis. fokus manual pada kamera fokus tetap).
+- Pilihan tersimpan antar sesi dan diterapkan ulang setiap kamera dipasang ulang (ganti lensa, kualitas, atau chroma).
+- Tombol bilah atas kamera dikecilkan (40 dp) agar delapan tombol muat di layar sempit.
+- Tes baru: keyframe (codec, interpolasi, penyuntingan), model dan rencana kamera manual, dan cadangan yang membawa keyframe.
 
-Tombol di bawah tab: tampil/sembunyikan, naikkan/turunkan urutan layer, duplikat, **tambah suara klip ke Audio**, hapus.
-*Tambah suara klip* menyalin suara klip video ke Studio Audio, dimulai pada waktu yang sama dengan layer; posisi dan
-volumenya bisa diatur lagi di sana.
-
-### Cara kerja
-- File video/gambar disalin ke folder proyek (`layers/`), jadi tetap aman walau file asli dihapus dari galeri.
-- Non-destruktif: foto asli tidak diubah. Filter, vignette, dan fade proyek ikut berlaku pada layer.
-- Posisi dan ukuran disimpan relatif terhadap layar film, jadi **pratinjau dan hasil ekspor sama**. Karena itu rasio
-  pratinjau kini mengikuti rasio foto pertama (sebelumnya selalu 3:4).
-- Ekspor MP4/GIF menggambar video layer frame demi frame menurut waktu film (FPS proyek). Ekspor **Foto (ZIP)** hanya
-  berisi foto frame tanpa layer.
-- Layer ikut dalam **cadangan, impor cadangan, dan duplikat proyek** (format cadangan tetap versi 1; cadangan lama tetap bisa
-  dibuka, aplikasi lama mengabaikan layer).
-- Database naik ke versi 7 (migrasi 6 ke 7, data lama aman). Layer tidak ikut undo/redo; menghapus layer tidak bisa di-undo.
-
-### Catatan
-- Pratinjau video layer memproses frame di latar belakang (maks. 720 px), jadi saat Play bisa sedikit kurang mulus
-  dibanding hasil ekspor yang selalu tepat per frame.
-- Suara dalam klip tidak otomatis ikut; ketuk ikon not musik di panel layer untuk menambahkannya ke Audio.
-- Tes baru: geometri layer, cadangan dengan layer (urutan, pengaturan, nilai liar dirapikan, batas jumlah).
-
-## Tahap 10 (v0.10.0) — Keyframe layer dan kontrol kamera
-
-### Keyframe (menu Layer, tab "Key")
-- Setiap layer punya keyframe untuk posisi, ukuran, rotasi, dan opasitas. Waktu keyframe dihitung dari awal layer.
-- Geser playhead ke tick yang diinginkan, ubah layer (geser/cubit/slider); perubahan otomatis menjadi keyframe di tick itu
-  bila layer sudah beranimasi. Ketuk ◆ untuk menambah/menghapus keyframe, pilih kurva: Linear, Halus, atau Tahan.
-- Pratinjau dan ekspor (MP4/GIF) memakai interpolasi yang sama. Keyframe ikut tersimpan di cadangan proyek (DB v8).
-
-### Kontrol kamera (ikon penyetel di bilah atas kamera)
-- Fokus: Auto, Manual, Kunci fokus dan eksposur, Kunci fokus dengan eksposur manual.
-- White balance: Auto, Terkunci, Incandescent, Fluorescent, Daylight, Cloudy, Twilight, Shade.
-- Kompensasi eksposur, zoom 1.0x–10.0x, Shutter, dan ISO.
-- Pilihan yang tidak didukung kamera dinonaktifkan dan diberi keterangan (kamera fokus tetap, tanpa shutter/ISO manual,
-  batas zoom lebih kecil dari 10x).
-- Eksposur manual menonaktifkan kompensasi eksposur dan flash. Pengaturan kembali ke default saat ganti kamera depan/belakang
-  dan tidak disimpan setelah aplikasi ditutup.

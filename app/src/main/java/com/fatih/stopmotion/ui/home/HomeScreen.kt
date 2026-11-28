@@ -351,7 +351,6 @@ private fun InfoBody(i: ProjectManager.Info) {
         InfoRow("Frame", "${i.frameCount} (${i.ticks} tick)")
         InfoRow("Durasi", String.format(Locale.US, "%.1f detik pada %d FPS", seconds, i.project.fps))
         InfoRow("Track audio", "${i.audioCount}")
-        InfoRow("Layer overlay", "${i.layerCount}")
         InfoRow("Ukuran", ProjectNames.formatBytes(i.bytes))
         InfoRow("Dibuat", fmt.format(Date(i.project.createdAt)))
         InfoRow("Diubah", fmt.format(Date(i.project.updatedAt)))

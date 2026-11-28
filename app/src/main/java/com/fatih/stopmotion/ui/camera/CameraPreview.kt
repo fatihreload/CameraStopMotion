@@ -1,18 +1,6 @@
-@file:OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
-
 package com.fatih.stopmotion.ui.camera
 
 import android.content.Context
-import android.hardware.camera2.CameraCaptureSession
-import android.hardware.camera2.CameraCharacteristics
-import android.hardware.camera2.CameraMetadata
-import android.hardware.camera2.CaptureRequest
-import android.hardware.camera2.CaptureResult
-import android.hardware.camera2.TotalCaptureResult
-import androidx.camera.camera2.interop.Camera2CameraControl
-import androidx.camera.camera2.interop.Camera2CameraInfo
-import androidx.camera.camera2.interop.Camera2Interop
-import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
@@ -26,10 +14,6 @@ import androidx.camera.view.PreviewView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.SideEffect
@@ -61,66 +45,6 @@ private suspend fun Context.awaitCameraProvider(): ProcessCameraProvider =
         )
     }
 
-/** Kamera yang sedang terpasang beserta kemampuannya. */
-private class BoundCamera(val camera: androidx.camera.core.Camera, val caps: CameraCaps)
-
-/** Membaca kemampuan kamera: rentang shutter/ISO, fokus, white balance, kompensasi eksposur, dan zoom. */
-private fun readCaps(camera: androidx.camera.core.Camera): CameraCaps = runCatching {
-    val info = Camera2CameraInfo.from(camera.cameraInfo)
-    fun <T> chr(key: CameraCharacteristics.Key<T>): T? = runCatching { info.getCameraCharacteristic(key) }.getOrNull()
-    val exposure = chr(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-    val iso = chr(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-    val aeModes = chr(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES)
-    val capabilities = chr(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-    val manual = exposure != null && iso != null &&
-        aeModes?.contains(CameraMetadata.CONTROL_AE_MODE_OFF) == true &&
-        capabilities?.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR) == true
-    val ev = camera.cameraInfo.exposureState
-    val evOk = ev.isExposureCompensationSupported
-    CameraCaps(
-        minExposureNs = exposure?.lower ?: 0L,
-        maxExposureNs = exposure?.upper ?: 0L,
-        minIso = iso?.lower ?: 0,
-        maxIso = iso?.upper ?: 0,
-        minFocusDiopter = chr(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f,
-        awbModes = chr(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES)?.toSet() ?: setOf(Awb.MODE_AUTO),
-        awbLockSupported = chr(CameraCharacteristics.CONTROL_AWB_LOCK_AVAILABLE) ?: false,
-        manualExposure = manual,
-        evMin = if (evOk) ev.exposureCompensationRange.lower else 0,
-        evMax = if (evOk) ev.exposureCompensationRange.upper else 0,
-        evStepStops = if (evOk) ev.exposureCompensationStep.toFloat() else 0f,
-        maxZoom = camera.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
-    )
-}.getOrDefault(CameraCaps())
-
-/**
- * Menerapkan rencana kontrol ke kamera. Opsi Camera2 diganti seluruhnya setiap kali (bukan ditambah), jadi
- * pengaturan yang dilepas (mis. kembali ke auto focus) otomatis dikembalikan ke perilaku bawaan CameraX.
- */
-private fun applyPlan(camera: androidx.camera.core.Camera, plan: RequestPlan) {
-    runCatching {
-        val b = CaptureRequestOptions.Builder()
-        if (plan.afOff) b.setCaptureRequestOption(CaptureRequest.CONTROL_AF_MODE, CameraMetadata.CONTROL_AF_MODE_OFF)
-        plan.focusDiopter?.let { b.setCaptureRequestOption(CaptureRequest.LENS_FOCUS_DISTANCE, it) }
-        if (plan.manualExposure) {
-            b.setCaptureRequestOption(CaptureRequest.CONTROL_AE_MODE, CameraMetadata.CONTROL_AE_MODE_OFF)
-            b.setCaptureRequestOption(CaptureRequest.SENSOR_EXPOSURE_TIME, plan.exposureNs)
-            b.setCaptureRequestOption(CaptureRequest.SENSOR_SENSITIVITY, plan.iso)
-        } else if (plan.aeLock) {
-            b.setCaptureRequestOption(CaptureRequest.CONTROL_AE_LOCK, true)
-        }
-        b.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_MODE, plan.awbMode)
-        if (plan.awbLock) b.setCaptureRequestOption(CaptureRequest.CONTROL_AWB_LOCK, true)
-        Camera2CameraControl.from(camera.cameraControl).setCaptureRequestOptions(b.build())
-    }
-    runCatching { camera.cameraControl.setZoomRatio(plan.zoom) }
-    runCatching {
-        if (camera.cameraInfo.exposureState.isExposureCompensationSupported) {
-            camera.cameraControl.setExposureCompensationIndex(plan.evIndex)
-        }
-    }
-}
-
 /**
  * Live preview CameraX + use case ImageCapture.
  * Mode COMPATIBLE (TextureView) dipakai agar overlay onion skin (Tahap 2)
@@ -133,14 +57,10 @@ fun CameraPreview(
     captureQuality: CaptureQuality,
     /** Bila aktif, setiap frame pratinjau diproses chroma key dan dikirim lewat onLiveFrame. */
     chroma: ChromaState,
-    /** Fokus, white balance, eksposur, zoom, shutter, ISO. */
-    adjust: CameraAdjust,
-    /** Dipanggil setiap kamera selesai dipasang, dengan kemampuan kamera itu. */
-    onCaps: (CameraCaps) -> Unit,
-    /** Nilai fokus/shutter/ISO yang sedang dipakai kamera (dilaporkan paling cepat tiap 0,3 detik, hanya bila berubah). */
-    onMeasured: (Measured) -> Unit,
     onLiveFrame: (android.graphics.Bitmap?) -> Unit,
     onReady: (imageCapture: ImageCapture, hasFlash: Boolean) -> Unit,
+    /** Dipanggil setiap kamera dipasang (ulang); dipakai untuk fokus, AW, EV, zoom, shutter, dan ISO manual. */
+    onCamera: (androidx.camera.core.Camera) -> Unit = {},
     onError: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -148,30 +68,8 @@ fun CameraPreview(
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentOnReady by rememberUpdatedState(onReady)
     val currentOnError by rememberUpdatedState(onError)
+    val currentOnCamera by rememberUpdatedState(onCamera)
     val currentOnLive by rememberUpdatedState(onLiveFrame)
-    val currentOnCaps by rememberUpdatedState(onCaps)
-    val currentOnMeasured by rememberUpdatedState(onMeasured)
-
-    // Nilai terakhir yang dipakai kamera, diisi dari hasil tiap frame (thread kamera), dibaca di sini.
-    val measuredRef = remember { AtomicReference(Measured()) }
-    val measureCallback = remember {
-        object : CameraCaptureSession.CaptureCallback() {
-            override fun onCaptureCompleted(
-                session: CameraCaptureSession,
-                request: CaptureRequest,
-                result: TotalCaptureResult
-            ) {
-                measuredRef.set(
-                    Measured(
-                        focusDiopter = result.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: -1f,
-                        exposureNs = result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: 0L,
-                        iso = result.get(CaptureResult.SENSOR_SENSITIVITY) ?: 0
-                    )
-                )
-            }
-        }
-    }
-    var bound by remember { mutableStateOf<BoundCamera?>(null) }
 
     // Pengaturan terbaru dibaca analyzer tanpa memasang ulang kamera setiap slider digeser.
     val chromaRef = remember { AtomicReference(chroma) }
@@ -225,11 +123,11 @@ fun CameraPreview(
                 currentOnError("Kamera ini tidak tersedia di perangkat.")
                 return@LaunchedEffect
             }
-            val previewBuilder = Preview.Builder().setResolutionSelector(resolutionSelector)
-            Camera2Interop.Extender(previewBuilder).setSessionCaptureCallback(measureCallback)
-            val preview = previewBuilder.build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
+            val preview = Preview.Builder()
+                .setResolutionSelector(resolutionSelector)
+                .build()
+                .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
-            bound = null
             provider.unbindAll()
             var camera: androidx.camera.core.Camera? = null
             if (live) {
@@ -274,38 +172,10 @@ fun CameraPreview(
                 }
             }
             if (camera == null) camera = provider.bindToLifecycle(lifecycleOwner, selector, preview, imageCapture)
+            currentOnCamera(camera)
             currentOnReady(imageCapture, camera.cameraInfo.hasFlashUnit())
-            val caps = readCaps(camera)
-            currentOnCaps(caps)
-            bound = BoundCamera(camera, caps)
         } catch (e: Exception) {
             currentOnError("Kamera gagal dibuka: ${e.message}")
-        }
-    }
-
-    // Terapkan pengaturan manual. Dicek tiap 0,3 dtk karena bagian eksposur yang masih otomatis mengikuti
-    // nilai terakhir kamera; kamera hanya disentuh bila rencananya benar-benar berubah.
-    LaunchedEffect(bound, adjust) {
-        val b = bound ?: return@LaunchedEffect
-        var last: RequestPlan? = null
-        while (isActive) {
-            val plan = adjust.plan(b.caps, measuredRef.get())
-            if (plan != last) {
-                applyPlan(b.camera, plan)
-                last = plan
-            }
-            delay(300)
-        }
-    }
-    LaunchedEffect(Unit) {
-        var last = Measured()
-        while (isActive) {
-            delay(300)
-            val m = measuredRef.get()
-            if (m != last) {
-                last = m
-                currentOnMeasured(m)
-            }
         }
     }
 

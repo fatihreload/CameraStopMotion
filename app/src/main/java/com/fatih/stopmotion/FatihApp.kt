@@ -6,9 +6,9 @@ import android.content.Context
 import com.fatih.stopmotion.data.AppDatabase
 import com.fatih.stopmotion.data.AudioRepository
 import com.fatih.stopmotion.data.ChromaRepository
+import com.fatih.stopmotion.data.LayerRepository
 import com.fatih.stopmotion.data.FrameBitmapCache
 import com.fatih.stopmotion.data.FrameImageCache
-import com.fatih.stopmotion.data.LayerRepository
 import com.fatih.stopmotion.data.ProjectManager
 import com.fatih.stopmotion.data.ProjectRepository
 import com.fatih.stopmotion.data.ProjectStorage
